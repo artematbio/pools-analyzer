@@ -262,9 +262,12 @@ class TelegramSender:
         from datetime import datetime, timezone
         return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     
-    async def test_connection(self) -> bool:
+    async def test_connection(self, send_test_message: bool = False) -> bool:
         """
         Test bot connection and permissions
+        
+        Args:
+            send_test_message: Whether to send a test message (optional)
         
         Returns:
             bool: Connection status
@@ -276,15 +279,25 @@ class TelegramSender:
             bot_info = await self.bot.get_me()
             logging.info(f"Bot connected successfully: @{bot_info.username}")
             
-            # Test sending a message
-            test_message = "🔧 Bot connection test successful"
-            await self.send_message(test_message)
+            # Only send test message if explicitly requested
+            if send_test_message:
+                test_message = "🔧 Bot connection test successful"
+                await self.send_message(test_message)
             
             return True
             
         except Exception as e:
             logging.error(f"Bot connection test failed: {e}")
             return False
+
+    async def test_connection_with_message(self) -> bool:
+        """
+        Test bot connection and send a test message
+        
+        Returns:
+            bool: Connection status
+        """
+        return await self.test_connection(send_test_message=True)
 
 # Convenience functions for quick usage
 async def send_quick_message(text: str) -> bool:
@@ -303,7 +316,7 @@ if __name__ == "__main__":
         sender = TelegramSender()
         
         # Test connection
-        if await sender.test_connection():
+        if await sender.test_connection_with_message():
             print("✅ Telegram bot is working!")
             
             # Test long message

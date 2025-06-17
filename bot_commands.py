@@ -255,10 +255,13 @@ Use /run_analysis to trigger manual analysis."""
         
         test_results = []
         
-        # Test 1: Bot connectivity
+        # Test 1: Bot connectivity (with test message)
         try:
-            bot_info = await context.bot.get_me()
-            test_results.append(f"✅ Bot connection: @{bot_info.username}")
+            if await self.telegram.test_connection_with_message():
+                bot_info = await context.bot.get_me()
+                test_results.append(f"✅ Bot connection: @{bot_info.username}")
+            else:
+                test_results.append("❌ Bot connection: Failed")
         except Exception as e:
             test_results.append(f"❌ Bot connection: {str(e)}")
         
