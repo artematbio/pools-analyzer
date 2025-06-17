@@ -417,21 +417,46 @@ class RaydiumScheduler:
             if total_value > 0:
                 await alerting_system.check_portfolio_changes(total_value)
             
-            # Clean up report file
-            try:
-                os.remove(latest_report)
-                logging.info(f"Cleaned up report file: {latest_report}")
-            except Exception as e:
-                logging.warning(f"Could not clean up report file: {e}")
+            # Keep report file for PHI analyzer, but clean up old files (older than 14 days)
+            await self._cleanup_old_report_files()
             
-            logging.info("Pool analysis completed successfully")
+            logging.info(f"Pool analysis completed successfully. Report saved: {latest_report}")
             
         except subprocess.TimeoutExpired:
             raise Exception("Pool analysis timed out after 5 minutes")
         except Exception as e:
             logging.error(f"Pool analysis failed: {e}")
             raise
-    
+
+    async def _cleanup_old_report_files(self):
+        """Clean up report files older than 14 days to save space"""
+        try:
+            import glob
+            from datetime import timedelta
+            
+            # Find all report files
+            report_files = glob.glob('raydium_pool_report_*.txt')
+            analysis_files = glob.glob('*anomaly_analysis*.txt')
+            
+            cutoff_time = datetime.now() - timedelta(days=14)
+            
+            files_removed = 0
+            for file_path in report_files + analysis_files:
+                try:
+                    file_time = datetime.fromtimestamp(os.path.getctime(file_path))
+                    if file_time < cutoff_time:
+                        os.remove(file_path)
+                        files_removed += 1
+                        logging.debug(f"Removed old file: {file_path}")
+                except Exception as e:
+                    logging.warning(f"Could not remove old file {file_path}: {e}")
+            
+            if files_removed > 0:
+                logging.info(f"Cleaned up {files_removed} old report/analysis files")
+                
+        except Exception as e:
+            logging.warning(f"Error during file cleanup: {e}")
+
     async def run_phi_analysis(self):
         """Execute PHI analysis"""
         try:
@@ -465,14 +490,10 @@ class RaydiumScheduler:
             if not success:
                 raise Exception("Failed to send PHI analysis to Telegram")
             
-            # Clean up analysis file
-            try:
-                os.remove(latest_analysis)
-                logging.info(f"Cleaned up analysis file: {latest_analysis}")
-            except Exception as e:
-                logging.warning(f"Could not clean up analysis file: {e}")
+            # Keep analysis file but clean up old files (done in _cleanup_old_report_files)
+            await self._cleanup_old_report_files()
             
-            logging.info("PHI analysis completed successfully")
+            logging.info(f"PHI analysis completed successfully. Analysis saved: {latest_analysis}")
             
         except subprocess.TimeoutExpired:
             raise Exception("PHI analysis timed out after 10 minutes")
