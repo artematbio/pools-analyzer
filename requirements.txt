@@ -18,6 +18,10 @@ python-dotenv>=1.0.0
 pandas>=2.2.0
 numpy>=1.26.0
 
+# Solana and binary data parsing
+construct>=2.10.0
+solders>=0.20.0
+
 # OpenAI for PHI analysis
 openai>=1.12.0
 
