@@ -11,6 +11,7 @@ from enum import Enum
 import signal
 import sys
 from dotenv import load_dotenv
+import glob
 
 # Web server for health checks
 try:
@@ -384,27 +385,41 @@ class RaydiumScheduler:
         try:
             logging.info("Starting pool analysis...")
             
+            # Log current directory and existing files
+            current_dir = os.getcwd()
+            existing_reports = glob.glob('raydium_pool_report_*.txt')
+            logging.info(f"Current directory: {current_dir}")
+            logging.info(f"Existing report files before analysis: {len(existing_reports)}")
+            
             # Run the pool analyzer
             result = subprocess.run([
                 'python3', 'pool_analyzer.py'
             ], capture_output=True, text=True, timeout=300)  # 5 minute timeout
             
             if result.returncode != 0:
+                logging.error(f"Pool analyzer stdout: {result.stdout}")
+                logging.error(f"Pool analyzer stderr: {result.stderr}")
                 raise Exception(f"Pool analyzer failed: {result.stderr}")
             
             # Find the latest report file
-            import glob
             report_files = glob.glob('raydium_pool_report_*.txt')
             if not report_files:
+                # List all .txt files to debug
+                all_txt_files = glob.glob('*.txt')
+                logging.error(f"No raydium_pool_report_*.txt files found. All .txt files: {all_txt_files}")
                 raise Exception("No report file generated")
             
             latest_report = max(report_files, key=os.path.getctime)
+            logging.info(f"Found latest report file: {latest_report}")
             
             # Read and format the report
             with open(latest_report, 'r') as f:
                 report_content = f.read()
             
+            logging.info(f"Report content length: {len(report_content)} characters")
+            
             formatted_report = self.formatter.format_pool_report(report_content)
+            logging.info(f"Formatted report length: {len(formatted_report)} characters")
             
             # Send to Telegram
             success = await self.telegram.send_message(formatted_report)
@@ -420,6 +435,9 @@ class RaydiumScheduler:
             # Keep report file for PHI analyzer, but clean up old files (older than 14 days)
             await self._cleanup_old_report_files()
             
+            # Log final state
+            final_reports = glob.glob('raydium_pool_report_*.txt')
+            logging.info(f"Final report files count: {len(final_reports)}")
             logging.info(f"Pool analysis completed successfully. Report saved: {latest_report}")
             
         except subprocess.TimeoutExpired:
@@ -431,9 +449,6 @@ class RaydiumScheduler:
     async def _cleanup_old_report_files(self):
         """Clean up report files older than 14 days to save space"""
         try:
-            import glob
-            from datetime import timedelta
-            
             # Find all report files
             report_files = glob.glob('raydium_pool_report_*.txt')
             analysis_files = glob.glob('*anomaly_analysis*.txt')
@@ -471,7 +486,6 @@ class RaydiumScheduler:
                 raise Exception(f"PHI analyzer failed: {result.stderr}")
             
             # Find the latest analysis file
-            import glob
             analysis_files = glob.glob('*anomaly_analysis*.txt')
             if not analysis_files:
                 raise Exception("No PHI analysis file generated")
