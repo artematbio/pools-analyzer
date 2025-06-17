@@ -1,0 +1,10 @@
+# Minimal requirements for Railway deployment test
+setuptools>=69.0.0
+wheel>=0.42.0
+requests>=2.31.0
+python-telegram-bot>=20.7
+python-dotenv>=1.0.0
+httpx>=0.26.0
+gunicorn>=21.2.0
+typing-extensions>=4.9.0
+pytz>=2023.3 
