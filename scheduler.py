@@ -237,7 +237,16 @@ class RaydiumScheduler:
                 await bot_app.run_polling(drop_pending_updates=True)
             except Exception as e:
                 logging.error(f"Bot handler error: {e}")
-                await alerting_system.send_error_alert("Telegram Bot", str(e))
+                # Don't try to send alerts when bot is shutting down
+                # Just log the error as the event loop might be closing
+            finally:
+                # Ensure proper cleanup
+                try:
+                    if bot_app.updater and bot_app.updater.running:
+                        await bot_app.stop()
+                        await bot_app.shutdown()
+                except Exception as cleanup_error:
+                    logging.error(f"Bot cleanup error: {cleanup_error}")
     
     def _should_run_task(self, task: ScheduledTask, current_time: datetime) -> bool:
         """Check if task should run based on cron expression"""

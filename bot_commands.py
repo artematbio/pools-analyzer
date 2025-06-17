@@ -59,8 +59,12 @@ class BotCommandHandler:
             return None
         
         try:
-            # Create application
-            application = Application.builder().token(self.bot_token).build()
+            # Create application with proper configuration
+            application = (
+                Application.builder()
+                .token(self.bot_token)
+                .build()
+            )
             
             # Add command handlers
             application.add_handler(CommandHandler("start", self.start_command))
