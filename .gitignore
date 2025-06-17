@@ -60,7 +60,9 @@ test_write.tmp
 # Generated reports (will be sent to Telegram instead)
 raydium_pool_report_*.txt
 *anomaly_analysis*.txt
-*.json
+# Exclude specific JSON reports but allow railway.json
+*report*.json
+*analysis*.json
 
 # Old local files
 OLD-LOCAL/

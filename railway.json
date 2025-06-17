@@ -1,0 +1,31 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "pip install --no-cache-dir --upgrade pip setuptools wheel && pip install --no-cache-dir -r requirements.txt"
+  },
+  "deploy": {
+    "startCommand": "python scheduler.py",
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 300,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3,
+    "numReplicas": 1,
+    "sleepApplication": false
+  },
+  "environments": {
+    "production": {
+      "variables": {
+        "TZ": "UTC",
+        "PORT": "8080",
+        "PYTHONUNBUFFERED": "1",
+        "PYTHONPATH": "."
+      }
+    }
+  },
+  "healthcheck": {
+    "path": "/health",
+    "timeout": 30,
+    "interval": 30
+  }
+} 
