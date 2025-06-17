@@ -75,6 +75,27 @@ class BotCommandHandler:
             application.add_handler(CommandHandler("test", self.test_command))
             
             logging.info("Bot commands setup completed")
+            
+            # Set bot commands in Telegram UI
+            try:
+                from telegram import BotCommand
+                commands = [
+                    BotCommand("start", "🚀 Welcome and overview"),
+                    BotCommand("help", "🆘 Show help message"),
+                    BotCommand("status", "📊 System status"),
+                    BotCommand("run_analysis", "🔄 Manual pool analysis"),
+                    BotCommand("schedule", "📅 View scheduled tasks"),
+                    BotCommand("test", "🧪 Test bot functionality")
+                ]
+                
+                # Initialize to set commands
+                await application.initialize()
+                await application.bot.set_my_commands(commands)
+                logging.info("✅ Bot commands registered in Telegram UI")
+                
+            except Exception as cmd_error:
+                logging.warning(f"Could not set bot commands in UI: {cmd_error}")
+            
             return application
             
         except Exception as e:

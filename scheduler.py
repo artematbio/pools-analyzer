@@ -234,17 +234,25 @@ class RaydiumScheduler:
         if bot_app:
             logging.info("🤖 Starting Telegram bot...")
             try:
-                await bot_app.run_polling(drop_pending_updates=True)
+                # Start the application (already initialized in setup_bot_commands)
+                await bot_app.start()
+                
+                # Start polling
+                await bot_app.updater.start_polling(drop_pending_updates=True)
+                
+                # Keep running while scheduler is active
+                while self.running:
+                    await asyncio.sleep(1)
+                    
             except Exception as e:
                 logging.error(f"Bot handler error: {e}")
-                # Don't try to send alerts when bot is shutting down
-                # Just log the error as the event loop might be closing
             finally:
-                # Ensure proper cleanup
+                # Clean shutdown
                 try:
                     if bot_app.updater and bot_app.updater.running:
-                        await bot_app.stop()
-                        await bot_app.shutdown()
+                        await bot_app.updater.stop()
+                    await bot_app.stop()
+                    await bot_app.shutdown()
                 except Exception as cleanup_error:
                     logging.error(f"Bot cleanup error: {cleanup_error}")
     
