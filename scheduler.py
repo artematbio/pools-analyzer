@@ -418,14 +418,26 @@ class RaydiumScheduler:
             
             logging.info(f"Report content length: {len(report_content)} characters")
             
-            formatted_report = self.formatter.format_pool_report(report_content)
-            logging.info(f"Formatted report length: {len(formatted_report)} characters")
+            formatted_report_parts = self.formatter.format_pool_report(report_content)
+            logging.info(f"Formatted report split into {len(formatted_report_parts)} parts")
             
-            # Send to Telegram
-            success = await self.telegram.send_message(formatted_report)
+            # Send all parts to Telegram
+            success = True
+            for i, part in enumerate(formatted_report_parts):
+                logging.info(f"Sending part {i+1}/{len(formatted_report_parts)}, length: {len(part)} characters")
+                
+                # Add small delay between messages to avoid rate limiting
+                if i > 0:
+                    await asyncio.sleep(1)
+                
+                part_success = await self.telegram.send_message(part)
+                if not part_success:
+                    logging.error(f"Failed to send report part {i+1}")
+                    success = False
+                    break
             
             if not success:
-                raise Exception("Failed to send report to Telegram")
+                raise Exception("Failed to send complete report to Telegram")
             
             # Extract portfolio value for change monitoring
             total_value = self.formatter._extract_total_value(report_content)
