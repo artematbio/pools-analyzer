@@ -13,17 +13,18 @@ class ReportFormatter:
     def __init__(self):
         self.max_message_length = 4096  # Telegram limit
         
-    def format_pool_report(self, report_content: str) -> str:
+    def format_pool_report(self, report_content: str) -> List[str]:
         """
         Format pool analysis report for Telegram
         Converts detailed text report to Telegram-friendly format
+        Returns list of message parts if report is too long
         """
         try:
             # Extract key information from the report
             report_data = self._parse_report_content(report_content)
             
             if not report_data:
-                return "Error: Could not parse pool report"
+                return ["Error: Could not parse pool report"]
             
             # Format the report
             formatted_report = self._build_detailed_report(report_data)
@@ -31,10 +32,10 @@ class ReportFormatter:
             # Split into messages if too long
             messages = self._split_message(formatted_report)
             
-            return messages[0] if messages else "Error: Empty report"
+            return messages if messages else ["Error: Empty report"]
             
         except Exception as e:
-            return f"Error formatting report: {str(e)}"
+            return [f"Error formatting report: {str(e)}"]
     
     def _parse_report_content(self, content: str) -> Optional[Dict]:
         """Parse the text report content and extract structured data"""
@@ -159,7 +160,7 @@ class ReportFormatter:
         
         # Header
         report.append("RAYDIUM POOLS ANALYSIS REPORT")
-        report.append("=" * 50)
+        report.append("=" * 40)  # Сокращаем разделитель
         report.append("")
         
         # Summary
@@ -169,57 +170,50 @@ class ReportFormatter:
         report.append(f"Total Positions: {data['total_positions']}")
         report.append(f"Total Value: ${data['total_value']:,.2f}")
         report.append("")
-        report.append("-" * 50)
+        report.append("-" * 40)  # Сокращаем разделитель
         report.append("")
         
         # Pool details
         for i, pool in enumerate(data['pools'], 1):
             report.append(f"POOL {i}: {pool['name']}")
-            report.append(f"ID: {pool['id']}")
-            report.append("")
             
-            # Basic metrics
-            report.append("LIQUIDITY & VOLUMES:")
+            # Basic metrics - сокращаем название
+            report.append("TVL & VOLUMES:")
             report.append(f"  TVL: ${pool['tvl']:,.2f}")
-            report.append(f"  24h Volume: ${pool['volume_24h']:,.2f}")
-            report.append(f"  7d Volume: ${pool['volume_7d']:,.2f}")
-            report.append("")
+            report.append(f"  24h Vol: ${pool['volume_24h']:,.2f}")
             
-            # Daily volumes (last 7 days)
+            # Daily volumes (last 7 days) - сокращаем заголовок
             if pool['daily_volumes']:
-                report.append("Daily volumes (last 7 days):")
+                report.append("Daily volumes (7d):")
                 for dv in pool['daily_volumes'][-7:]:
                     report.append(f"  {dv['date']}: ${dv['volume']:,.2f}")
-                report.append("")
             
             # Positions
             report.append("POSITIONS:")
-            report.append(f"  Active positions: {pool['positions_count']}")
-            report.append(f"  Total value: ${pool['positions_value']:,.2f}")
-            report.append(f"  Pending yield: ${pool['pending_yield']:,.2f}")
-            report.append("")
+            report.append(f"  Active: {pool['positions_count']}")  # Сокращаем
+            report.append(f"  Value: ${pool['positions_value']:,.2f}")   # Сокращаем
+            report.append(f"  Yield: ${pool['pending_yield']:,.2f}")     # Сокращаем
             
             # Position details
             if pool['positions']:
-                report.append("Position details:")
+                report.append("Details:")  # Сокращаем заголовок
                 for pos in pool['positions']:
-                    report.append(f"  {pos['number']}. NFT: {pos['nft_id']}")
+                    # Убираем NFT из описания позиций для экономии места
+                    report.append(f"  {pos['number']}. {pos['nft_id']}")
                     report.append(f"     Value: ${pos['value']:,.2f}")
                     report.append(f"     Yield: ${pos['yield']:,.2f}")
-                report.append("")
             
-            report.append("-" * 30)
+            report.append("-" * 25)  # Сокращаем разделитель
             report.append("")
         
-        # Footer
+        # Footer - сокращаем
         report.append("SUMMARY:")
-        report.append(f"Total portfolio value: ${data['total_value']:,.2f}")
-        report.append(f"Total active positions: {data['total_positions']}")
+        report.append(f"Portfolio: ${data['total_value']:,.2f}")  # Сокращаем
+        report.append(f"Positions: {data['total_positions']}")    # Сокращаем
         total_yield = sum(pool['pending_yield'] for pool in data['pools'])
-        report.append(f"Total pending yield: ${total_yield:,.2f}")
+        report.append(f"Total yield: ${total_yield:,.2f}")        # Сокращаем
         report.append("")
-        report.append("Next update: Automated schedule")
-        report.append("Generated by Railway deployment")
+        report.append("Next: Automated schedule")  # Сокращаем
         
         return "\n".join(report)
     
@@ -349,6 +343,27 @@ class ReportFormatter:
         except Exception as e:
             return f"Error formatting status: {str(e)}"
     
+    def format_error_alert(self, error_type: str, error_message: str, context: str = "") -> str:
+        """Format error alert message"""
+        lines = []
+        lines.append("ERROR ALERT")
+        lines.append("=" * 15)
+        lines.append("")
+        
+        current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+        lines.append(f"Timestamp: {current_time}")
+        lines.append(f"Error Type: {error_type}")
+        lines.append("")
+        lines.append("Message:")
+        lines.append(error_message)
+        
+        if context:
+            lines.append("")
+            lines.append("Context:")
+            lines.append(context)
+        
+        return '\n'.join(lines)
+    
     def _extract_total_value(self, report_content: str) -> float:
         """Extract total portfolio value from report"""
         try:
@@ -394,7 +409,8 @@ if __name__ == "__main__":
     
     formatted = formatter.format_pool_report(sample_report)
     print("=== FORMATTED REPORT ===")
-    print(formatted)
+    for part in formatted:
+        print(part)
     
     # Test error formatting
     error_msg = formatter.format_error_alert("Pool Analysis", "Connection timeout", "API rate limit exceeded")
