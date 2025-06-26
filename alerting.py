@@ -11,6 +11,16 @@ from dotenv import load_dotenv
 from telegram_sender import TelegramSender
 from report_formatter import ReportFormatter
 
+# Supabase integration
+try:
+    from database_handler import supabase_handler
+    SUPABASE_ENABLED = True
+    logging.info("✅ Supabase handler loaded for alerts")
+except ImportError as e:
+    logging.warning(f"⚠️ Supabase handler not available: {e}")
+    supabase_handler = None
+    SUPABASE_ENABLED = False
+
 load_dotenv()
 
 class AlertLevel(Enum):
@@ -353,12 +363,53 @@ class AlertingSystem:
         return time_since_last < cooldown_period
     
     def _record_alert(self, alert: Alert) -> None:
-        """Record alert in history"""
+        """Record alert in history and duplicate to Supabase"""
         self.alert_history.append(alert)
         
         # Keep only last 100 alerts to prevent memory issues
         if len(self.alert_history) > 100:
             self.alert_history = self.alert_history[-100:]
+        
+        # Duplicate to Supabase
+        if SUPABASE_ENABLED and supabase_handler and supabase_handler.is_connected():
+            try:
+                alert_data = {
+                    'level': alert.level.value,
+                    'title': alert.title,
+                    'message': alert.message,
+                    'context': alert.context or '',
+                    'timestamp': alert.timestamp.isoformat(),
+                    'source': 'pool_analyzer'
+                }
+                
+                # Save to Supabase asynchronously (non-blocking)
+                import asyncio
+                try:
+                    # Try to get current event loop
+                    loop = asyncio.get_running_loop()
+                    # Schedule the coroutine to run
+                    loop.create_task(self._save_alert_to_supabase(alert_data))
+                except RuntimeError:
+                    # No event loop running, save synchronously
+                    result = supabase_handler.save_alert(alert_data)
+                    if result:
+                        logging.debug(f"✅ Alert duplicated to Supabase: {alert.title}")
+                    else:
+                        logging.warning(f"⚠️ Failed to duplicate alert to Supabase: {alert.title}")
+                        
+            except Exception as e:
+                logging.error(f"❌ Error duplicating alert to Supabase: {e}")
+    
+    async def _save_alert_to_supabase(self, alert_data: Dict[str, Any]) -> None:
+        """Asynchronously save alert to Supabase"""
+        try:
+            result = supabase_handler.save_alert(alert_data)
+            if result:
+                logging.debug(f"✅ Alert duplicated to Supabase: {alert_data['title']}")
+            else:
+                logging.warning(f"⚠️ Failed to duplicate alert to Supabase: {alert_data['title']}")
+        except Exception as e:
+            logging.error(f"❌ Error saving alert to Supabase: {e}")
     
     def _update_error_tracking(self, error_key: str) -> None:
         """Update error tracking counters and timestamps"""

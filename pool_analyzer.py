@@ -5,7 +5,7 @@ import math
 import base64
 import traceback
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Set, Any
+from typing import List, Dict, Optional, Set, Any, Union
 from decimal import Decimal, getcontext, ROUND_DOWN
 from dotenv import load_dotenv
 import random
@@ -16,6 +16,16 @@ from solders.pubkey import Pubkey
 
 # Импортируем функцию get_clmm_positions из positions.py
 from positions import get_clmm_positions
+
+# Supabase integration for data duplication
+try:
+    from database_handler import supabase_handler
+    SUPABASE_ENABLED = True
+    print("✅ Supabase handler loaded for token price duplication")
+except ImportError as e:
+    print(f"⚠️ Supabase handler not available: {e}")
+    supabase_handler = None
+    SUPABASE_ENABLED = False
 
 # --- Определение основных целевых пулов для детального анализа ---
 TARGET_POOL_ID_1 = "DojNuRx9Ncky7BbWRfsLmJg2oYb8qsYD344XufUHAjbJ"  # BIO/CURES
@@ -1747,6 +1757,53 @@ async def fetch_token_prices_geckoterminal(token_addresses: List[str], client: h
         print(f"[ERROR] Error in fetch_token_prices_geckoterminal: {e}")
         return {}
 
+async def duplicate_token_prices_to_supabase(token_prices: Dict[str, Decimal], source: str = "GeckoTerminal") -> bool:
+    """
+    Дублирует цены токенов в Supabase
+    
+    Args:
+        token_prices: Словарь с ценами токенов {address: price}
+        source: Источник цен (например, "GeckoTerminal", "CoinGecko")
+        
+    Returns:
+        bool: True если дублирование прошло успешно
+    """
+    if not SUPABASE_ENABLED or not supabase_handler or not supabase_handler.is_connected():
+        print("[INFO] Supabase not available, skipping token price duplication")
+        return False
+    
+    try:
+        success_count = 0
+        total_count = len(token_prices)
+        
+        print(f"[INFO] Duplicating {total_count} token prices to Supabase...")
+        
+        for token_address, price in token_prices.items():
+            if price > Decimal(0):  # Дублируем только валидные цены
+                token_symbol = TOKEN_SYMBOL_MAP.get(token_address, "UNKNOWN")
+                
+                price_data = {
+                    'token_address': token_address,
+                    'symbol': token_symbol,
+                    'price_usd': float(price),
+                    'source': source,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                result = supabase_handler.save_token_price(price_data)
+                if result:
+                    success_count += 1
+                    print(f"[DEBUG] ✅ Token price duplicated: {token_symbol} ({token_address}) = ${price}")
+                else:
+                    print(f"[WARN] ⚠️ Failed to duplicate token price: {token_symbol} ({token_address})")
+        
+        print(f"[INFO] Token price duplication complete: {success_count}/{total_count} successful")
+        return success_count > 0
+        
+    except Exception as e:
+        print(f"[ERROR] Error duplicating token prices to Supabase: {e}")
+        return False
+
 # Основная функция
 async def main():
     """
@@ -1765,6 +1822,7 @@ async def main():
     print(f"  Primary target pools for detailed analysis: {PRIMARY_TARGET_POOL_IDS}")
     print(f"  Helius RPC URL: {HELIUS_RPC_URL[:30]}...")
     print(f"{'=' * 50}")
+    
     
     print(f"Target wallet: {TARGET_WALLET_ADDRESS}")
     
@@ -1816,6 +1874,15 @@ async def main():
                     print(f"[INFO] GeckoTerminal price for {token_addr} ({TOKEN_SYMBOL_MAP.get(token_addr, 'Unknown')}): ${price}")
             
             print(f"[INFO] GeckoTerminal fetch complete. Processed prices for all {len(all_token_addresses)} unique tokens.")
+
+            # Дублируем цены токенов в Supabase
+            if gecko_terminal_prices:
+                print("[INFO] Duplicating token prices to Supabase...")
+                duplication_success = await duplicate_token_prices_to_supabase(gecko_terminal_prices, "GeckoTerminal")
+                if duplication_success:
+                    print("[INFO] ✅ Token prices successfully duplicated to Supabase")
+                else:
+                    print("[WARN] ⚠️ Token price duplication to Supabase failed or partially failed")
         else:
             print("[INFO] No token addresses found to fetch prices for. master_token_prices remains empty.")
             
@@ -2121,311 +2188,4 @@ async def main():
             
             # Добавляем данные текущего пула в общий список
             detailed_report_data_for_primary_pools.append(pool_specific_data)
-        
-        # Шаг 4: Группируем позиции по пулам для удобства анализа (сохраняем для обратной совместимости)
-        pools_data = {}
-        
-        for position in all_wallet_positions:
-            pool_id = position["pool_id"]
             
-            if pool_id not in pools_data:
-                pools_data[pool_id] = {
-                    "pool_id": pool_id,
-                    "pool_name": position["pool_name"],
-                    "positions": [],
-                    "total_usd_value": Decimal(0),
-                    "in_range_positions": 0,
-                    "out_of_range_positions": 0,
-                    "unknown_range_positions": 0
-                }
-            
-            # Добавляем позицию в соответствующий пул
-            pools_data[pool_id]["positions"].append(position)
-            
-            # Обновляем статистику пула
-            position_value_usd = Decimal(position["position_value_usd"])
-            pools_data[pool_id]["total_usd_value"] += position_value_usd
-            
-            if position["in_range"] is True:
-                pools_data[pool_id]["in_range_positions"] += 1
-            elif position["in_range"] is False:
-                pools_data[pool_id]["out_of_range_positions"] += 1
-            else:
-                pools_data[pool_id]["unknown_range_positions"] += 1
-        
-        # Подготовка данных для секции "ДРУГИЕ ПУЛЫ"
-        other_pools_data_aggregated = {}
-        for position in all_wallet_positions:
-            pool_id = position["pool_id"]
-            if pool_id not in PRIMARY_TARGET_POOL_IDS:
-                if pool_id not in other_pools_data_aggregated:
-                    other_pools_data_aggregated[pool_id] = {
-                        "pool_id": pool_id,
-                        "pool_name": position["pool_name"],
-                        "positions": [],
-                        "total_usd_value": Decimal(0)
-                    }
-                other_pools_data_aggregated[pool_id]["positions"].append(position)
-                other_pools_data_aggregated[pool_id]["total_usd_value"] += Decimal(position["position_value_usd"])
-        
-        # Шаг 5: Формируем итоговые статистические данные
-        total_value_usd = sum(Decimal(pos["position_value_usd"]) for pos in all_wallet_positions)
-        
-        in_range_positions = sum(1 for pos in all_wallet_positions if pos["in_range"] is True)
-        out_of_range_positions = sum(1 for pos in all_wallet_positions if pos["in_range"] is False)
-        unknown_range_positions = sum(1 for pos in all_wallet_positions if pos["in_range"] is None)
-        
-        end_time = datetime.now()
-        execution_time = (end_time - start_time).total_seconds()
-        
-        # Шаг 6: Подготовка итогового отчета
-        final_output = {
-            "analysis_timestamp": start_time.isoformat(),
-            "execution_time_seconds": execution_time,
-            "wallet_address": TARGET_WALLET_ADDRESS,
-            "primary_pools_analysis": detailed_report_data_for_primary_pools,
-            "other_pools_summary": list(other_pools_data_aggregated.values()),
-            "all_positions": all_wallet_positions,
-            "stats": {
-                "total_pools": len(pools_data),
-                "total_positions": len(all_wallet_positions),
-                "primary_pools_count": len(detailed_report_data_for_primary_pools),
-                "total_value_usd": total_value_usd,
-                "in_range_positions": in_range_positions,
-                "out_of_range_positions": out_of_range_positions,
-                "unknown_range_positions": unknown_range_positions,
-            }
-        }
-        
-        # JSON файл больше не генерируется, оставляем только текстовый отчет
-        # Сохраняем имя переменной report_filename для совместимости со старым кодом
-        report_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        report_filename = f"raydium_pool_report_{report_timestamp}.json" # Не используется, но сохраняем для обратной совместимости
-        
-        # Генерация текстового отчета с timestamp
-        try:
-            # Создаем имя файла с timestamp, используя тот же timestamp, что был для JSON
-            txt_report_filename = f"raydium_pool_report_{report_timestamp}.txt"
-            
-            with open(txt_report_filename, "w", encoding="utf-8") as f:
-                # Заголовок отчета
-                f.write("=====================================================\n")
-                f.write("ОТЧЕТ ПО RAYDIUM CLMM ПУЛУ - АНАЛИТИЧЕСКИЙ ОБЗОР\n")
-                f.write("=====================================================\n\n")
-                # Moved wallet address to the beginning of the report (global section)
-                f.write(f"Анализируемый кошелек: {TARGET_WALLET_ADDRESS}\n\n")
-
-                # Для каждого основного пула выводим детальную информацию
-                for pool_data in detailed_report_data_for_primary_pools:
-                    f.write(f"--- АНАЛИЗ ПУЛА: {pool_data['name']} ({pool_data['id']}) ---\n\n")
-
-                    # ОСНОВНАЯ ИНФОРМАЦИЯ О ПУЛЕ
-                    f.write("ОСНОВНАЯ ИНФОРМАЦИЯ О ПУЛЕ\n")
-                    f.write("-----------------------------------------------------\n")
-                    f.write(f"ID Пула: {pool_data['id']}\n")
-                    token_a_symbol = pool_data['mintA']['symbol']
-                    token_b_symbol = pool_data['mintB']['symbol']
-                    token_a_address = pool_data['mintA']['address']
-                    token_b_address = pool_data['mintB']['address']
-                    
-                    # Try to get descriptive full names if available
-                    token_a_name = pool_data['mintA'].get('name', token_a_symbol)
-                    token_b_name = pool_data['mintB'].get('name', token_b_symbol)
-                    
-                    # If name is empty or "Unknown Token", use symbol instead
-                    if not token_a_name or token_a_name == "Unknown Token":
-                        token_a_name = token_a_symbol
-                    if not token_b_name or token_b_name == "Unknown Token":
-                        token_b_name = token_b_symbol
-                    
-                    f.write(f"Пара токенов: {token_a_symbol}/{token_b_symbol} ({token_a_address} / {token_b_address})\n")
-                    f.write(f"Полные имена: {token_a_name} ({token_a_symbol}) / {token_b_name} ({token_b_symbol})\n")
-                    f.write("Тип пула: Concentrated Liquidity Market Maker (CLMM)\n")
-                    f.write("Платформа: Raydium V3\n\n")
-
-                    # ТЕХНИЧЕСКИЕ ПАРАМЕТРЫ
-                    f.write("ТЕХНИЧЕСКИЕ ПАРАМЕТРЫ\n")
-                    f.write("-----------------------------------------------------\n")
-                    current_price = pool_data['price']
-                    # Improved formatting for fee rate
-                    f.write(f"Текущая цена: {current_price} {token_b_symbol}/{token_a_symbol}\n")
-                    fee_rate = pool_data['feeRate']
-                    f.write(f"Fee rate: {fee_rate*100:.2f}% ({fee_rate})\n")
-                    f.write(f"Decimals токенов: {token_a_symbol} (9), {token_b_symbol} (6)\n")
-                    f.write("Конфигурация: Стандартная Raydium CLMM\n\n")
-
-                    # ЛИКВИДНОСТЬ И ОБЪЕМЫ
-                    total_usd_value = pool_data['total_usd_value']
-                    pool_tvl_usd = Decimal(pool_data.get('pool_tvl_usd', '0'))
-                    pool_24h_volume_usd = Decimal(pool_data.get('pool_24h_volume_usd', '0'))
-                    
-                    # Получаем недельный объем (сумма за 7 дней)
-                    weekly_volume_usd = sum(Decimal(day.get('daily_usd_volume', '0')) for day in pool_data.get('pool_7d_daily_volumes', []))
-                    
-                    f.write("ЛИКВИДНОСТЬ И ОБЪЕМЫ\n")
-                    f.write("-----------------------------------------------------\n")
-                    # Improved number formatting with comma thousands separators and two decimal places
-                    f.write(f"Общая стоимость позиций кошелька: ${total_usd_value:,.2f}\n")
-                    f.write(f"Общая ликвидность пула (TVL): ${pool_tvl_usd:,.2f}\n")
-                    f.write(f"Объем торгов за 24 часа: ${pool_24h_volume_usd:,.2f}\n")
-                    f.write(f"Объем торгов за 7 дней: ${weekly_volume_usd:,.2f}\n")
-                    
-                    # Объемы по дням
-                    if pool_data.get('pool_7d_daily_volumes'):
-                        f.write("Объемы торгов по дням (последние 7 дней):\n")
-                        for day_data in pool_data.get('pool_7d_daily_volumes', []):
-                            date = day_data.get('date', 'Unknown')
-                            daily_usd_volume = Decimal(day_data.get('daily_usd_volume', '0'))
-                            f.write(f"  - {date}: ${daily_usd_volume:,.2f}\n")
-                    f.write("\n")
-                    
-                    # Добавляем сводку по истории торгов
-                    hist_summary = pool_data.get('pool_7d_historical_summary', {})
-                    if hist_summary:
-                        f.write("Сводка по истории торгов (7 дней, BitQuery):\n")
-                        f.write(f"  - Всего записей (агрегированных): {hist_summary.get('records_count', 0)}\n")
-                        f.write(f"  - Общее кол-во сделок: {hist_summary.get('total_trades_count', '0')}\n")
-                        
-                        base_symbol = hist_summary.get('base_token_symbol', 'N/A')
-                        total_volume_base = Decimal(hist_summary.get('total_volume_base_token', '0'))
-                        f.write(f"  - Общий объем ({base_symbol}): {total_volume_base:,.6f}\n")
-                        
-                        total_usd_volume = Decimal(hist_summary.get('total_usd_volume', '0'))
-                        f.write(f"  - Общий объем (USD): ${total_usd_volume:,.2f}\n")
-                        
-                        buy_volume = Decimal(hist_summary.get('total_buy_volume_base_token', '0'))
-                        f.write(f"  - Общий объем покупок ({base_symbol}): {buy_volume:,.6f}\n")
-                        
-                        sell_volume = Decimal(hist_summary.get('total_sell_volume_base_token', '0'))
-                        f.write(f"  - Общий объем продаж ({base_symbol}): {sell_volume:,.6f}\n")
-                        f.write("\n")
-
-                    # Removed "Данные о минутных свечах" section as requested
-
-                    # ПОЗИЦИИ В ПУЛЕ
-                    positions = pool_data['positions']
-                    in_range_count = pool_data['in_range_positions']
-                    out_of_range_count = pool_data['out_of_range_positions']
-                    f.write("ПОЗИЦИИ В ПУЛЕ\n")
-                    f.write("-----------------------------------------------------\n")
-                    # Removed wallet address from here (moved to the top of the report)
-                    f.write(f"Активные позиции: {len(positions)} позиции в пуле\n")
-                    f.write(f"Общая стоимость позиций: ~${total_usd_value:,.2f}\n")
-                    
-                    # Conditionally show out of range positions only if > 0
-                    if out_of_range_count > 0:
-                        f.write(f"Позиции вне диапазона: {out_of_range_count}\n")
-                    
-                    f.write(f"Позиции в диапазоне: {in_range_count}\n\n")
-
-                    # Детали позиций
-                    f.write("Детали позиций:\n")
-                    for i, position in enumerate(positions, 1):
-                        position_value_usd = Decimal(position['position_value_usd'])
-                        position_share_percent = Decimal(position.get('position_liquidity_share_percent', '0'))
-                        
-                        f.write(f"{i}. NFT: {position['position_mint']}\n")
-                        f.write(f"   Стоимость: ${position_value_usd:,.2f}\n")
-                        f.write(f"   Доля ликвидности в пуле: {position_share_percent:.4f}%\n")
-                        
-                        # Improved token amount formatting
-                        try:
-                            amount0 = Decimal(position['amount0'])
-                            amount1 = Decimal(position['amount1'])
-                            f.write(f"   Токены: {amount0:,.8f} {token_a_symbol}, {amount1:,.8f} {token_b_symbol}\n")
-                        except:
-                            f.write(f"   Токены: {position['amount0']} {token_a_symbol}, {position['amount1']} {token_b_symbol}\n")
-                        
-                        # Improved pending yield formatting
-                        total_yield_usd_str = position.get('total_pending_yield_usd_str', '0.00')
-                        try:
-                            # Convert to Decimal for better formatting, removing any non-numeric characters
-                            clean_yield_str = total_yield_usd_str.replace('~', '').replace('$', '')
-                            total_yield_usd = Decimal(clean_yield_str)
-                            f.write(f"   Общий Pending Yield: ~${total_yield_usd:,.2f}\n")
-                        except:
-                            f.write(f"   Общий Pending Yield: ~{total_yield_usd_str}\n")
-                        
-                        # Показываем источник данных о комиссиях
-                        fees_data_source = position.get('fees_data_source', 'N/A')
-                        source_display = {
-                            'json_uri': 'Raydium API (json_uri)',
-                            'onchain_calculation': 'Расчет на основе блокчейн-данных',
-                            'none': 'Нет данных'
-                        }.get(fees_data_source, fees_data_source)
-                        f.write(f"     Источник данных по комиссиям: {source_display}\n")
-                        
-                        # Показываем детали наград, если они есть
-                        rewards_details = position.get('pending_rewards_details', [])
-                        if rewards_details:
-                            f.write("     Невостребованные награды:\n")
-                            for reward_detail in rewards_details:
-                                f.write(f"       - {reward_detail['amount']} {reward_detail['symbol']} (${reward_detail['usd_value']})\n")
-                                
-                        # Показываем детали торговых комиссий (можно опционально скрыть)
-                        try:
-                            unclaimed_fees_str = position.get('unclaimed_fees_total_usd_str', '0')
-                            # Remove non-numeric characters
-                            clean_fees_str = unclaimed_fees_str.replace('~', '').replace('$', '').replace(',', '')
-                            unclaimed_fees_usd = Decimal(clean_fees_str)
-                            if unclaimed_fees_usd > 0 or not rewards_details:
-                                f.write(f"     Невостребованные торговые комиссии: ~${unclaimed_fees_usd:,.2f}\n") 
-                        except:
-                            if position.get('unclaimed_fees_total_usd_str'):
-                                f.write(f"     Невостребованные торговые комиссии: ~{position.get('unclaimed_fees_total_usd_str')}\n")
-                            
-                        in_range_status = "В диапазоне" if position['in_range'] is True else "Вне диапазона" if position['in_range'] is False else "Статус неизвестен"
-                        f.write(f"   Статус: {in_range_status}\n\n")
-
-                    f.write("\n")
-
-                # ДРУГИЕ ПУЛЫ
-                other_pools = list(other_pools_data_aggregated.values())
-                total_other_positions = sum(len(pool['positions']) for pool in other_pools)
-                total_other_value = sum(pool['total_usd_value'] for pool in other_pools)
-
-                f.write("ДРУГИЕ ПУЛЫ\n")
-                f.write("-----------------------------------------------------\n")
-                f.write(f"Всего найдено позиций: {total_other_positions} (в {len(other_pools)} разных пулах)\n")
-                f.write(f"Общая стоимость всех позиций: ~${total_other_value:,.2f}\n")
-                if other_pools:
-                    f.write("Другие пулы:\n")
-                    for pool in other_pools:
-                        f.write(f"- {pool['pool_name']}: {len(pool['positions'])} позиций, ${pool['total_usd_value']:,.2f}\n")
-                f.write("\n")
-
-                # ОБЩАЯ СТАТИСТИКА
-                all_positions_value = total_value_usd
-                f.write("ОБЩАЯ СТАТИСТИКА ПО ВСЕМ ПОЗИЦИЯМ КОШЕЛЬКА\n")
-                f.write("-----------------------------------------------------\n")
-                f.write(f"Всего CLMM позиций: {len(all_wallet_positions)}\n")
-                f.write(f"Общая стоимость всех позиций: ${all_positions_value:,.2f}\n\n")
-
-                # Подвал отчета - переписываю для однозначного формирования даты
-                current_datetime = datetime.now()
-                formatted_date = current_datetime.strftime('%d.%m.%Y %H:%M')
-                f.write("-----------------------------------------------------\n")
-                f.write("* Отчет сгенерирован с использованием pool_analyzer.py (Расширенная версия)\n")
-                f.write("* Данные получены через: Helius RPC, Raydium API, BitQuery API, positions.py\n")
-                f.write(f"* Дата формирования: {formatted_date}\n")
-                f.write("===================================================== \n")
-
-            print(f"[INFO] Text report saved to: {txt_report_filename}")
-        except Exception as e:
-            print(f"[ERROR] Failed to generate text report: {e}")
-            traceback.print_exc()
-        
-        # Выводим основную информацию в консоль
-        print(f"{'=' * 50}")
-        print(f"Analysis completed at: {end_time.isoformat()}")
-        print(f"Execution time: {execution_time:.2f} seconds")
-        print(f"Found {len(all_wallet_positions)} total positions in {len(pools_data)} pools")
-        print(f"Primary pools analyzed: {len(detailed_report_data_for_primary_pools)}")
-        print(f"Total value USD: ${total_value_usd}")
-        print(f"Positions in range: {in_range_positions}, out of range: {out_of_range_positions}, unknown range: {unknown_range_positions}")
-        print(f"Report saved to: {txt_report_filename}")
-        print(f"{'=' * 50}")
-
-# Точка входа
-if __name__ == "__main__":
-    asyncio.run(main()) 

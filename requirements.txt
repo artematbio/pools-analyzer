@@ -36,4 +36,8 @@ psutil>=5.9.6
 gunicorn>=21.2.0
 
 # Standard library enhancements
-typing-extensions>=4.9.0 
+typing-extensions>=4.9.0
+
+# Supabase integration
+supabase>=2.0.0
+psycopg2-binary>=2.9.0 
