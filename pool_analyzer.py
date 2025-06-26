@@ -1804,6 +1804,112 @@ async def duplicate_token_prices_to_supabase(token_prices: Dict[str, Decimal], s
         print(f"[ERROR] Error duplicating token prices to Supabase: {e}")
         return False
 
+async def duplicate_pool_data_to_supabase(pool_data: Dict[str, Any]) -> bool:
+    """
+    Дублирует данные пула в Supabase
+    
+    Args:
+        pool_data: Словарь с данными пула
+        
+    Returns:
+        bool: True если дублирование прошло успешно
+    """
+    if not SUPABASE_ENABLED or not supabase_handler or not supabase_handler.is_connected():
+        print("[INFO] Supabase not available, skipping pool data duplication")
+        return False
+    
+    try:
+        timestamp = datetime.now().isoformat()
+        
+        # Подготавливаем данные пула для сохранения
+        pool_snapshot_data = {
+            'pool_id': pool_data.get('id'),
+            'pool_name': pool_data.get('name'),
+            'token0_address': pool_data.get('mintA', {}).get('address'),
+            'token0_symbol': pool_data.get('mintA', {}).get('symbol'),
+            'token0_price': float(pool_data.get('mintA', {}).get('price', 0)),
+            'token1_address': pool_data.get('mintB', {}).get('address'),
+            'token1_symbol': pool_data.get('mintB', {}).get('symbol'),
+            'token1_price': float(pool_data.get('mintB', {}).get('price', 0)),
+            'current_price': float(pool_data.get('price', 0)),
+            'fee_rate': float(pool_data.get('feeRate', 0)),
+            'tvl_usd': float(pool_data.get('pool_tvl_usd', 0)),
+            'volume_24h_usd': float(pool_data.get('pool_24h_volume_usd', 0)),
+            'total_positions': len(pool_data.get('positions', [])),
+            'in_range_positions': pool_data.get('in_range_positions', 0),
+            'out_of_range_positions': pool_data.get('out_of_range_positions', 0),
+            'total_value_usd': float(pool_data.get('total_usd_value', 0)),
+            'timestamp': timestamp
+        }
+        
+        # Сохраняем снимок пула
+        pool_result = supabase_handler.save_pool_snapshot(pool_snapshot_data)
+        
+        if pool_result:
+            print(f"[INFO] ✅ Pool snapshot duplicated: {pool_data.get('name', 'N/A')}")
+        else:
+            print(f"[WARN] ⚠️ Failed to duplicate pool snapshot: {pool_data.get('name', 'N/A')}")
+        
+        # Дублируем данные по дневным объемам, если есть
+        daily_volumes = pool_data.get('pool_7d_daily_volumes', [])
+        if daily_volumes:
+            volume_success_count = 0
+            for daily_volume in daily_volumes:
+                volume_data = {
+                    'pool_id': pool_data.get('id'),
+                    'pool_name': pool_data.get('name'),
+                    'date': daily_volume.get('date'),
+                    'volume_usd': float(daily_volume.get('daily_usd_volume', 0)),
+                    'volume_base': float(daily_volume.get('volume', 0)),
+                    'trades_count': daily_volume.get('trades', 0),
+                    'source': daily_volume.get('source', 'bitquery'),
+                    'timestamp': timestamp
+                }
+                
+                volume_result = supabase_handler.save_pool_volume_data(volume_data)
+                if volume_result:
+                    volume_success_count += 1
+            
+            print(f"[INFO] ✅ Pool volume data duplicated: {volume_success_count}/{len(daily_volumes)} records")
+        
+        # Дублируем данные позиций
+        positions = pool_data.get('positions', [])
+        if positions:
+            position_success_count = 0
+            for position in positions:
+                position_snapshot_data = {
+                    'position_mint': position.get('position_mint'),
+                    'pool_id': position.get('pool_id'),
+                    'pool_name': position.get('pool_name'),
+                    'token0_address': position.get('token0'),
+                    'token0_symbol': position.get('pool_name', '').split('/')[0] if '/' in position.get('pool_name', '') else 'UNKNOWN',
+                    'token0_amount': float(position.get('token0_amount', 0)),
+                    'token1_address': position.get('token1'),
+                    'token1_symbol': position.get('pool_name', '').split('/')[1] if '/' in position.get('pool_name', '') else 'UNKNOWN',
+                    'token1_amount': float(position.get('token1_amount', 0)),
+                    'position_value_usd': float(position.get('position_value_usd', 0)),
+                    'fees_usd': float(position.get('fees_usd', 0)),
+                    'in_range': position.get('in_range', False),
+                    'tick_lower': position.get('tick_lower'),
+                    'tick_upper': position.get('tick_upper'),
+                    'current_price': float(position.get('current_price', 0)),
+                    'fee_tier': float(position.get('fee_tier', 0)),
+                    'liquidity_share_percent': float(position.get('position_liquidity_share_percent', 0)),
+                    'timestamp': timestamp
+                }
+                
+                position_result = supabase_handler.save_position_snapshot(position_snapshot_data)
+                if position_result:
+                    position_success_count += 1
+            
+            print(f"[INFO] ✅ Position snapshots duplicated: {position_success_count}/{len(positions)} positions")
+        
+        return pool_result is not None
+        
+    except Exception as e:
+        print(f"[ERROR] Error duplicating pool data to Supabase: {e}")
+        return False
+
 # Основная функция
 async def main():
     """
@@ -2188,4 +2294,12 @@ async def main():
             
             # Добавляем данные текущего пула в общий список
             detailed_report_data_for_primary_pools.append(pool_specific_data)
+            
+            # Дублируем данные пула в Supabase
+            print(f"[INFO] Duplicating pool data to Supabase for pool {pool_specific_data.get('name', 'N/A')}...")
+            pool_duplication_success = await duplicate_pool_data_to_supabase(pool_specific_data)
+            if pool_duplication_success:
+                print(f"[INFO] ✅ Pool data successfully duplicated to Supabase: {pool_specific_data.get('name', 'N/A')}")
+            else:
+                print(f"[WARN] ⚠️ Pool data duplication to Supabase failed: {pool_specific_data.get('name', 'N/A')}")
             

@@ -214,6 +214,104 @@ class SupabaseHandler:
             logging.error(f"❌ Ошибка сохранения активности пула: {e}")
             return None
     
+    # === POOL DATA ===
+    def save_pool_snapshot(self, pool_data: Dict[str, Any]) -> Optional[str]:
+        """Сохранить снимок данных пула в Supabase"""
+        try:
+            if not self.is_connected():
+                return None
+                
+            converted_data = self._convert_data(pool_data)
+            
+            # Проверяем существующую запись для этого пула и времени
+            existing = self.client.table('pool_snapshots').select('id').eq(
+                'pool_id', pool_data.get('pool_id')
+            ).eq(
+                'timestamp', pool_data.get('timestamp')
+            ).execute()
+            
+            if existing.data:
+                # Обновляем существующую запись
+                result = self.client.table('pool_snapshots').update(
+                    converted_data
+                ).eq('id', existing.data[0]['id']).execute()
+                
+                if result.data:
+                    logging.info(f"✅ Данные пула обновлены: {pool_data.get('pool_name', 'N/A')}")
+                    return existing.data[0]['id']
+            else:
+                # Создаем новую запись
+                result = self.client.table('pool_snapshots').insert(converted_data).execute()
+                
+                if result.data:
+                    logging.info(f"✅ Снимок пула сохранен: {pool_data.get('pool_name', 'N/A')}")
+                    return result.data[0].get('id')
+                    
+            return None
+                
+        except Exception as e:
+            logging.error(f"❌ Ошибка сохранения снимка пула: {e}")
+            return None
+    
+    def save_position_snapshot(self, position_data: Dict[str, Any]) -> Optional[str]:
+        """Сохранить снимок позиции в Supabase"""
+        try:
+            if not self.is_connected():
+                return None
+                
+            converted_data = self._convert_data(position_data)
+            
+            # Проверяем существующую запись для этой позиции и времени
+            existing = self.client.table('position_snapshots').select('id').eq(
+                'position_mint', position_data.get('position_mint')
+            ).eq(
+                'timestamp', position_data.get('timestamp')
+            ).execute()
+            
+            if existing.data:
+                # Обновляем существующую запись
+                result = self.client.table('position_snapshots').update(
+                    converted_data
+                ).eq('id', existing.data[0]['id']).execute()
+                
+                if result.data:
+                    logging.info(f"✅ Данные позиции обновлены: {position_data.get('position_mint', 'N/A')}")
+                    return existing.data[0]['id']
+            else:
+                # Создаем новую запись
+                result = self.client.table('position_snapshots').insert(converted_data).execute()
+                
+                if result.data:
+                    logging.info(f"✅ Снимок позиции сохранен: {position_data.get('position_mint', 'N/A')}")
+                    return result.data[0].get('id')
+                    
+            return None
+                
+        except Exception as e:
+            logging.error(f"❌ Ошибка сохранения снимка позиции: {e}")
+            return None
+    
+    def save_pool_volume_data(self, volume_data: Dict[str, Any]) -> Optional[str]:
+        """Сохранить данные объема торгов пула"""
+        try:
+            if not self.is_connected():
+                return None
+                
+            converted_data = self._convert_data(volume_data)
+            
+            result = self.client.table('pool_volumes').insert(converted_data).execute()
+            
+            if result.data:
+                logging.info(f"✅ Данные объема пула сохранены: {volume_data.get('pool_id', 'N/A')}")
+                return result.data[0].get('id')
+            else:
+                logging.error(f"❌ Не удалось сохранить данные объема пула: {volume_data}")
+                return None
+                
+        except Exception as e:
+            logging.error(f"❌ Ошибка сохранения данных объема пула: {e}")
+            return None
+
     # === BATCH OPERATIONS ===
     def save_batch_data(self, table_name: str, data_list: List[Dict[str, Any]]) -> int:
         """Сохранить данные батчем"""
