@@ -56,6 +56,10 @@ logs/
 *.tmp
 *.temp
 test_write.tmp
+migration_schema.sql
+supabase_schema.sql
+supabase_final_schema.sql
+migrate_to_lp_tables.py
 
 # Generated reports (will be sent to Telegram instead)
 raydium_pool_report_*.txt

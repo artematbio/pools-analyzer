@@ -1760,154 +1760,128 @@ async def fetch_token_prices_geckoterminal(token_addresses: List[str], client: h
 async def duplicate_token_prices_to_supabase(token_prices: Dict[str, Decimal], source: str = "GeckoTerminal") -> bool:
     """
     Дублирует цены токенов в Supabase
-    
-    Args:
-        token_prices: Словарь с ценами токенов {address: price}
-        source: Источник цен (например, "GeckoTerminal", "CoinGecko")
-        
-    Returns:
-        bool: True если дублирование прошло успешно
+    Теперь работает в фоновом режиме и не блокирует основной процесс
     """
-    if not SUPABASE_ENABLED or not supabase_handler or not supabase_handler.is_connected():
-        print("[INFO] Supabase not available, skipping token price duplication")
-        return False
-    
     try:
+        print(f"[BACKGROUND] Duplicating {len(token_prices)} token prices to Supabase...")
+        
+        from database_handler import supabase_handler
+        
+        if not supabase_handler or not supabase_handler.is_connected():
+            print("[BACKGROUND] ⚠️ Supabase handler not available for token prices duplication")
+            return False
+        
         success_count = 0
-        total_count = len(token_prices)
-        
-        print(f"[INFO] Duplicating {total_count} token prices to Supabase...")
-        
         for token_address, price in token_prices.items():
-            if price > Decimal(0):  # Дублируем только валидные цены
-                token_symbol = TOKEN_SYMBOL_MAP.get(token_address, "UNKNOWN")
-                
-                price_data = {
-                    'token_address': token_address,
-                    'symbol': token_symbol,
-                    'price_usd': float(price),
-                    'source': source,
-                    'timestamp': datetime.now().isoformat()
-                }
-                
-                result = supabase_handler.save_token_price(price_data)
-                if result:
-                    success_count += 1
-                    print(f"[DEBUG] ✅ Token price duplicated: {token_symbol} ({token_address}) = ${price}")
-                else:
-                    print(f"[WARN] ⚠️ Failed to duplicate token price: {token_symbol} ({token_address})")
+            price_data = {
+                'token_address': token_address,
+                'symbol': TOKEN_SYMBOL_MAP.get(token_address, 'Unknown'),
+                'price_usd': float(price),
+                'source': source,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            result = supabase_handler.save_token_price(price_data)
+            if result:
+                success_count += 1
         
-        print(f"[INFO] Token price duplication complete: {success_count}/{total_count} successful")
+        print(f"[BACKGROUND] ✅ Token prices duplication completed: {success_count}/{len(token_prices)} successful")
         return success_count > 0
         
     except Exception as e:
-        print(f"[ERROR] Error duplicating token prices to Supabase: {e}")
+        print(f"[BACKGROUND] ❌ Error duplicating token prices to Supabase: {e}")
         return False
 
 async def duplicate_pool_data_to_supabase(pool_data: Dict[str, Any]) -> bool:
     """
     Дублирует данные пула в Supabase
-    
-    Args:
-        pool_data: Словарь с данными пула
-        
-    Returns:
-        bool: True если дублирование прошло успешно
+    Теперь работает в фоновом режиме и не блокирует основной процесс
     """
-    if not SUPABASE_ENABLED or not supabase_handler or not supabase_handler.is_connected():
-        print("[INFO] Supabase not available, skipping pool data duplication")
-        return False
-    
     try:
-        timestamp = datetime.now().isoformat()
+        pool_name = pool_data.get('name', 'Unknown')
+        print(f"[BACKGROUND] Duplicating pool data to Supabase: {pool_name}")
         
-        # Подготавливаем данные пула для сохранения
+        from database_handler import supabase_handler
+        
+        if not supabase_handler or not supabase_handler.is_connected():
+            print(f"[BACKGROUND] ⚠️ Supabase handler not available for pool {pool_name}")
+            return False
+        
+        # Подготавливаем данные для сохранения
         pool_snapshot_data = {
             'pool_id': pool_data.get('id'),
-            'pool_name': pool_data.get('name'),
+            'pool_name': pool_name,
             'token0_address': pool_data.get('mintA', {}).get('address'),
-            'token0_symbol': pool_data.get('mintA', {}).get('symbol'),
+            'token0_symbol': pool_data.get('mintA', {}).get('symbol', 'Unknown'),
             'token0_price': float(pool_data.get('mintA', {}).get('price', 0)),
             'token1_address': pool_data.get('mintB', {}).get('address'),
-            'token1_symbol': pool_data.get('mintB', {}).get('symbol'),
+            'token1_symbol': pool_data.get('mintB', {}).get('symbol', 'Unknown'),
             'token1_price': float(pool_data.get('mintB', {}).get('price', 0)),
             'current_price': float(pool_data.get('price', 0)),
-            'fee_rate': float(pool_data.get('feeRate', 0)),
             'tvl_usd': float(pool_data.get('pool_tvl_usd', 0)),
             'volume_24h_usd': float(pool_data.get('pool_24h_volume_usd', 0)),
+            'fee_rate': float(pool_data.get('feeRate', 0)),
             'total_positions': len(pool_data.get('positions', [])),
             'in_range_positions': pool_data.get('in_range_positions', 0),
             'out_of_range_positions': pool_data.get('out_of_range_positions', 0),
             'total_value_usd': float(pool_data.get('total_usd_value', 0)),
-            'timestamp': timestamp
+            'timestamp': datetime.now().isoformat()
         }
         
         # Сохраняем снимок пула
         pool_result = supabase_handler.save_pool_snapshot(pool_snapshot_data)
         
-        if pool_result:
-            print(f"[INFO] ✅ Pool snapshot duplicated: {pool_data.get('name', 'N/A')}")
-        else:
-            print(f"[WARN] ⚠️ Failed to duplicate pool snapshot: {pool_data.get('name', 'N/A')}")
-        
-        # Дублируем данные по дневным объемам, если есть
-        daily_volumes = pool_data.get('pool_7d_daily_volumes', [])
-        if daily_volumes:
-            volume_success_count = 0
-            for daily_volume in daily_volumes:
-                volume_data = {
-                    'pool_id': pool_data.get('id'),
-                    'pool_name': pool_data.get('name'),
-                    'date': daily_volume.get('date'),
-                    'volume_usd': float(daily_volume.get('daily_usd_volume', 0)),
-                    'volume_base': float(daily_volume.get('volume', 0)),
-                    'trades_count': daily_volume.get('trades', 0),
-                    'source': daily_volume.get('source', 'bitquery'),
-                    'timestamp': timestamp
-                }
-                
-                volume_result = supabase_handler.save_pool_volume_data(volume_data)
-                if volume_result:
-                    volume_success_count += 1
-            
-            print(f"[INFO] ✅ Pool volume data duplicated: {volume_success_count}/{len(daily_volumes)} records")
-        
-        # Дублируем данные позиций
+        # Сохраняем снимки позиций
+        position_results = []
         positions = pool_data.get('positions', [])
-        if positions:
-            position_success_count = 0
-            for position in positions:
-                position_snapshot_data = {
-                    'position_mint': position.get('position_mint'),
-                    'pool_id': position.get('pool_id'),
-                    'pool_name': position.get('pool_name'),
-                    'token0_address': position.get('token0'),
-                    'token0_symbol': position.get('pool_name', '').split('/')[0] if '/' in position.get('pool_name', '') else 'UNKNOWN',
-                    'token0_amount': float(position.get('token0_amount', 0)),
-                    'token1_address': position.get('token1'),
-                    'token1_symbol': position.get('pool_name', '').split('/')[1] if '/' in position.get('pool_name', '') else 'UNKNOWN',
-                    'token1_amount': float(position.get('token1_amount', 0)),
-                    'position_value_usd': float(position.get('position_value_usd', 0)),
-                    'fees_usd': float(position.get('fees_usd', 0)),
-                    'in_range': position.get('in_range', False),
-                    'tick_lower': position.get('tick_lower'),
-                    'tick_upper': position.get('tick_upper'),
-                    'current_price': float(position.get('current_price', 0)),
-                    'fee_tier': float(position.get('fee_tier', 0)),
-                    'liquidity_share_percent': float(position.get('position_liquidity_share_percent', 0)),
-                    'timestamp': timestamp
-                }
-                
-                position_result = supabase_handler.save_position_snapshot(position_snapshot_data)
-                if position_result:
-                    position_success_count += 1
+        for position in positions:
+            position_snapshot_data = {
+                'pool_id': pool_data.get('id'),
+                'position_mint': position.get('position_mint'),
+                'position_pda': position.get('position_pda'),
+                'liquidity': str(position.get('liquidity', 0)),
+                'tick_lower': position.get('tick_lower'),
+                'tick_upper': position.get('tick_upper'),
+                'token0_amount': float(position.get('token0_amount', 0)),
+                'token1_amount': float(position.get('token1_amount', 0)),
+                'position_value_usd': float(position.get('position_value_usd', 0)),
+                'fees_usd': float(position.get('fees_usd', 0)),
+                'in_range': position.get('in_range', False),
+                'timestamp': datetime.now().isoformat()
+            }
             
-            print(f"[INFO] ✅ Position snapshots duplicated: {position_success_count}/{len(positions)} positions")
+            pos_result = supabase_handler.save_position_snapshot(position_snapshot_data)
+            position_results.append(pos_result is not None)
+        
+        # Сохраняем дневные объемы
+        daily_volumes = pool_data.get('pool_7d_daily_volumes', [])
+        volume_results = []
+        for volume_data in daily_volumes:
+            volume_snapshot_data = {
+                'pool_id': pool_data.get('id'),
+                'pool_name': pool_name,
+                'date': volume_data.get('date'),
+                'volume_usd': float(volume_data.get('daily_usd_volume', 0)),
+                'trades_count': volume_data.get('trades_count', 0),
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            vol_result = supabase_handler.save_pool_volume_data(volume_snapshot_data)
+            volume_results.append(vol_result is not None)
+        
+        success_positions = sum(position_results)
+        success_volumes = sum(volume_results)
+        
+        print(f"[BACKGROUND] ✅ Pool data duplication completed for {pool_name}:")
+        print(f"[BACKGROUND]   - Pool snapshot: {'✅' if pool_result else '❌'}")
+        print(f"[BACKGROUND]   - Position snapshots: {success_positions}/{len(positions)}")
+        print(f"[BACKGROUND]   - Volume data: {success_volumes}/{len(daily_volumes)}")
         
         return pool_result is not None
         
     except Exception as e:
-        print(f"[ERROR] Error duplicating pool data to Supabase: {e}")
+        pool_name = pool_data.get('name', 'Unknown')
+        print(f"[BACKGROUND] ❌ Error duplicating pool data to Supabase for {pool_name}: {e}")
         return False
 
 # Основная функция
@@ -1979,327 +1953,479 @@ async def main():
                 else:
                     print(f"[INFO] GeckoTerminal price for {token_addr} ({TOKEN_SYMBOL_MAP.get(token_addr, 'Unknown')}): ${price}")
             
+            # Дублируем цены токенов в Supabase (асинхронно в фоне)
+            if gecko_terminal_prices:
+                print("[INFO] Starting token prices duplication to Supabase in background...")
+                asyncio.create_task(duplicate_token_prices_to_supabase(gecko_terminal_prices, "GeckoTerminal"))
+            
             print(f"[INFO] GeckoTerminal fetch complete. Processed prices for all {len(all_token_addresses)} unique tokens.")
 
-            # Дублируем цены токенов в Supabase
-            if gecko_terminal_prices:
-                print("[INFO] Duplicating token prices to Supabase...")
-                duplication_success = await duplicate_token_prices_to_supabase(gecko_terminal_prices, "GeckoTerminal")
-                if duplication_success:
-                    print("[INFO] ✅ Token prices successfully duplicated to Supabase")
+            # Дополнительная проверка цен для важных токенов (BIO, MYCO, SPINE)
+            critical_tokens = [BIO_ADDRESS, MYCO_ADDRESS, SPINE_ADDRESS]
+            for token in critical_tokens:
+                if token in master_token_prices:
+                    price = master_token_prices[token]
+                    if price == Decimal(0):
+                        print(f"[CRITICAL WARNING] Price for {token} ({TOKEN_SYMBOL_MAP.get(token, 'Unknown')}) is $0!")
+                    else:
+                        print(f"[CRITICAL INFO] Price for {token} ({TOKEN_SYMBOL_MAP.get(token, 'Unknown')}) is ${price}")
                 else:
-                    print("[WARN] ⚠️ Token price duplication to Supabase failed or partially failed")
-        else:
-            print("[INFO] No token addresses found to fetch prices for. master_token_prices remains empty.")
+                    print(f"[CRITICAL ERROR] {token} ({TOKEN_SYMBOL_MAP.get(token, 'Unknown')}) not found in master_token_prices!")
             
-        # Дополнительная проверка цен для важных токенов (BIO, MYCO, SPINE)
-        critical_tokens = [BIO_ADDRESS, MYCO_ADDRESS, SPINE_ADDRESS]
-        for token in critical_tokens:
-            if token in master_token_prices:
-                price = master_token_prices[token]
-                if price == Decimal(0):
-                    print(f"[CRITICAL WARNING] Price for {token} ({TOKEN_SYMBOL_MAP.get(token, 'Unknown')}) is $0!")
+            # Шаг 1.8: Вывод итоговых цен в формате таблицы
+            print(f"[INFO] Final token prices (EXCLUSIVELY from GeckoTerminal) for position calculations:")
+            print(f"{'-' * 70}") # Увеличил ширину для читаемости
+            print(f"{'Token Address':<45} | {'Symbol':<10} | {'Price USD':<10}")
+            print(f"{'-' * 70}")
+            
+            if master_token_prices:
+                for token_address, price in master_token_prices.items():
+                    symbol = TOKEN_SYMBOL_MAP.get(token_address, "Unknown")
+                    price_display = f"${price}" if price > Decimal(0) else "$0.00 (Not Found)"
+                    print(f"{token_address:<45} | {symbol:<10} | {price_display:<10}")
+            else:
+                print("No token prices were fetched or available.")
+            print(f"{'-' * 70}")
+            
+            # Переменная token_price_sources для вывода в таблицу - заполняем одним значением для всех
+            token_price_sources = {token: "GeckoTerminal" for token in master_token_prices}
+            
+            # Шаг 2: Анализируем данные для каждого из основных пулов
+            detailed_report_data_for_primary_pools = []
+            
+            # Получаем состояния пулов онлайн заранее (для эффективности)
+            target_pools_onchain_states = {}
+            for pool_id in PRIMARY_TARGET_POOL_IDS:
+                print(f"[INFO] Pre-fetching onchain state for pool {pool_id}")
+                pool_state = await fetch_onchain_pool_state(HELIUS_RPC_URL, pool_id, client)
+                if pool_state:
+                    target_pools_onchain_states[pool_id] = pool_state
+                    print(f"[INFO] Successfully fetched onchain state for pool {pool_id}")
                 else:
-                    print(f"[CRITICAL INFO] Price for {token} ({TOKEN_SYMBOL_MAP.get(token, 'Unknown')}) is ${price}")
-            else:
-                print(f"[CRITICAL ERROR] {token} ({TOKEN_SYMBOL_MAP.get(token, 'Unknown')}) not found in master_token_prices!")
-        
-        # Шаг 1.8: Вывод итоговых цен в формате таблицы
-        print(f"[INFO] Final token prices (EXCLUSIVELY from GeckoTerminal) for position calculations:")
-        print(f"{'-' * 70}") # Увеличил ширину для читаемости
-        print(f"{'Token Address':<45} | {'Symbol':<10} | {'Price USD':<10}")
-        print(f"{'-' * 70}")
-        
-        if master_token_prices:
-            for token_address, price in master_token_prices.items():
-                symbol = TOKEN_SYMBOL_MAP.get(token_address, "Unknown")
-                price_display = f"${price}" if price > Decimal(0) else "$0.00 (Not Found)"
-                print(f"{token_address:<45} | {symbol:<10} | {price_display:<10}")
-        else:
-            print("No token prices were fetched or available.")
-        print(f"{'-' * 70}")
-        
-        # Переменная token_price_sources для вывода в таблицу - заполняем одним значением для всех
-        token_price_sources = {token: "GeckoTerminal" for token in master_token_prices}
-        
-        # Шаг 2: Анализируем данные для каждого из основных пулов
-        detailed_report_data_for_primary_pools = []
-        
-        # Получаем состояния пулов онлайн заранее (для эффективности)
-        target_pools_onchain_states = {}
-        for pool_id in PRIMARY_TARGET_POOL_IDS:
-            print(f"[INFO] Pre-fetching onchain state for pool {pool_id}")
-            pool_state = await fetch_onchain_pool_state(HELIUS_RPC_URL, pool_id, client)
-            if pool_state:
-                target_pools_onchain_states[pool_id] = pool_state
-                print(f"[INFO] Successfully fetched onchain state for pool {pool_id}")
-            else:
-                print(f"[WARN] Failed to fetch onchain state for pool {pool_id}")
-        
-        for current_pool_id_from_list in PRIMARY_TARGET_POOL_IDS:
-            # Фильтруем позиции для текущего целевого пула
-            positions_in_this_main_pool = [pos for pos in all_wallet_positions if pos["pool_id"] == current_pool_id_from_list]
+                    print(f"[WARN] Failed to fetch onchain state for pool {pool_id}")
             
-            if not positions_in_this_main_pool:
-                print(f"[INFO] No positions found in primary pool {current_pool_id_from_list}")
-                continue
+            for current_pool_id_from_list in PRIMARY_TARGET_POOL_IDS:
+                # Фильтруем позиции для текущего целевого пула
+                positions_in_this_main_pool = [pos for pos in all_wallet_positions if pos["pool_id"] == current_pool_id_from_list]
                 
-            print(f"[INFO] Found {len(positions_in_this_main_pool)} positions in primary pool {current_pool_id_from_list}")
-            
-            # Получаем рыночные данные пула (TVL и 24h объем)
-            print(f"[INFO] Fetching market data for pool {current_pool_id_from_list}")
-            pool_market_data = await fetch_raydium_pool_market_data(current_pool_id_from_list, client)
-            
-            pool_tvl_usd = Decimal("0")
-            pool_24h_volume_usd = Decimal("0")
-            
-            if pool_market_data:
-                pool_tvl_usd = pool_market_data.get("pool_tvl_usd", Decimal("0"))
-                pool_24h_volume_usd = pool_market_data.get("pool_24h_volume_usd", Decimal("0"))
-                print(f"[INFO] Pool TVL: ${pool_tvl_usd}, 24h Volume: ${pool_24h_volume_usd}")
-            else:
-                print(f"[WARN] Could not fetch market data for pool {current_pool_id_from_list}")
-            
-            # Берем информацию из первой позиции этого пула
-            first_position = positions_in_this_main_pool[0]
-            
-            # Получаем объем торгов пула за 7 дней по дням
-            token0_address = first_position["token0"]
-            token1_address = first_position["token1"]
-            
-            # Передаем общий словарь цен в запрос для дневных объемов
-            print(f"[INFO] Fetching 7-day daily volume for pool {first_position['pool_name']}")
-            daily_volumes_7d = await fetch_bitquery_pool_daily_volume_7d(
-                token_a_mint=token0_address, 
-                token_b_mint=token1_address, 
-                token_prices=master_token_prices,  # Используем обновленный мастер-словарь цен
-                client=client
-            )
-            
-            # Получаем минутные свечи цены для обоих токенов пула (за 7 дней)
-            # Для свечей используем USDC как quote currency
-            usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # USDC mint address
-            
-            print(f"[INFO] Fetching 7-day minute candles for token {TOKEN_SYMBOL_MAP.get(token0_address, 'token0')}")
-            token0_candles_7d = await fetch_bitquery_token_minute_candles_7d(token0_address, usdc_mint, client)
-            
-            print(f"[INFO] Fetching 7-day minute candles for token {TOKEN_SYMBOL_MAP.get(token1_address, 'token1')}")
-            token1_candles_7d = await fetch_bitquery_token_minute_candles_7d(token1_address, usdc_mint, client)
-            
-            # Получаем исторические данные о торгах за 7 дней
-            print(f"[INFO] Fetching 7-day historical trade data for {first_position['pool_name']}")
-            historical_trades_data_list = await fetch_bitquery_trade_history(token0_address, token1_address, days_ago=7, client=client)
-            
-            if historical_trades_data_list:
-                tokens_for_historical_volume_calc = set()
-                for record_item in historical_trades_data_list: 
-                    usd_volume_val = record_item.get('usd_volume')
-                    # Проверяем, что usd_volume либо отсутствует, либо равен 0
-                    if usd_volume_val is None or (isinstance(usd_volume_val, (str, int, float)) and Decimal(str(usd_volume_val)) == Decimal(0)):
-                        base_mint = record_item.get('Trade', {}).get('Side', {}).get('Currency', {}).get('MintAddress')
-                        if base_mint:
-                            tokens_for_historical_volume_calc.add(base_mint)
-                
-                tokens_needing_fetch = [
-                    token_mint for token_mint in tokens_for_historical_volume_calc 
-                    if token_mint not in master_token_prices or master_token_prices.get(token_mint, Decimal(0)) == Decimal(0)
-                ]
-                
-                if tokens_needing_fetch:
-                    print(f"[INFO] Fetching additional prices for {len(tokens_needing_fetch)} tokens for historical USD volume calculation")
-                    additional_prices = await fetch_token_prices_coingecko(tokens_needing_fetch, client)
-                    if additional_prices:
-                        for token_mint, price_val in additional_prices.items():
-                            if price_val > 0:
-                                master_token_prices[token_mint] = Decimal(str(price_val))
-                                token_price_sources[token_mint] = "CoinGecko"
-                                print(f"[INFO] Updated price for {token_mint} ({TOKEN_SYMBOL_MAP.get(token_mint, 'Unknown')}): ${price_val} from CoinGecko")
+                if not positions_in_this_main_pool:
+                    print(f"[INFO] No positions found in primary pool {current_pool_id_from_list}")
+                    continue
                     
-                    # Проверяем, остались ли токены, для которых не смогли получить цены через CoinGecko
-                    tokens_still_needing_price_after_cg = [
-                        token_mint for token_mint in tokens_needing_fetch
+                print(f"[INFO] Found {len(positions_in_this_main_pool)} positions in primary pool {current_pool_id_from_list}")
+                
+                # Получаем рыночные данные пула (TVL и 24h объем)
+                print(f"[INFO] Fetching market data for pool {current_pool_id_from_list}")
+                pool_market_data = await fetch_raydium_pool_market_data(current_pool_id_from_list, client)
+                
+                pool_tvl_usd = Decimal("0")
+                pool_24h_volume_usd = Decimal("0")
+                
+                if pool_market_data:
+                    pool_tvl_usd = pool_market_data.get("pool_tvl_usd", Decimal("0"))
+                    pool_24h_volume_usd = pool_market_data.get("pool_24h_volume_usd", Decimal("0"))
+                    print(f"[INFO] Pool TVL: ${pool_tvl_usd}, 24h Volume: ${pool_24h_volume_usd}")
+                else:
+                    print(f"[WARN] Could not fetch market data for pool {current_pool_id_from_list}")
+                
+                # Берем информацию из первой позиции этого пула
+                first_position = positions_in_this_main_pool[0]
+                
+                # Получаем объем торгов пула за 7 дней по дням
+                token0_address = first_position["token0"]
+                token1_address = first_position["token1"]
+                
+                # Передаем общий словарь цен в запрос для дневных объемов
+                print(f"[INFO] Fetching 7-day daily volume for pool {first_position['pool_name']}")
+                daily_volumes_7d = await fetch_bitquery_pool_daily_volume_7d(
+                    token_a_mint=token0_address, 
+                    token_b_mint=token1_address, 
+                    token_prices=master_token_prices,  # Используем обновленный мастер-словарь цен
+                    client=client
+                )
+                
+                # Получаем минутные свечи цены для обоих токенов пула (за 7 дней)
+                # Для свечей используем USDC как quote currency
+                usdc_mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # USDC mint address
+                
+                print(f"[INFO] Fetching 7-day minute candles for token {TOKEN_SYMBOL_MAP.get(token0_address, 'token0')}")
+                token0_candles_7d = await fetch_bitquery_token_minute_candles_7d(token0_address, usdc_mint, client)
+                
+                print(f"[INFO] Fetching 7-day minute candles for token {TOKEN_SYMBOL_MAP.get(token1_address, 'token1')}")
+                token1_candles_7d = await fetch_bitquery_token_minute_candles_7d(token1_address, usdc_mint, client)
+                
+                # Получаем исторические данные о торгах за 7 дней
+                print(f"[INFO] Fetching 7-day historical trade data for {first_position['pool_name']}")
+                historical_trades_data_list = await fetch_bitquery_trade_history(token0_address, token1_address, days_ago=7, client=client)
+                
+                if historical_trades_data_list:
+                    tokens_for_historical_volume_calc = set()
+                    for record_item in historical_trades_data_list: 
+                        usd_volume_val = record_item.get('usd_volume')
+                        # Проверяем, что usd_volume либо отсутствует, либо равен 0
+                        if usd_volume_val is None or (isinstance(usd_volume_val, (str, int, float)) and Decimal(str(usd_volume_val)) == Decimal(0)):
+                            base_mint = record_item.get('Trade', {}).get('Side', {}).get('Currency', {}).get('MintAddress')
+                            if base_mint:
+                                tokens_for_historical_volume_calc.add(base_mint)
+                
+                    tokens_needing_fetch = [
+                        token_mint for token_mint in tokens_for_historical_volume_calc 
                         if token_mint not in master_token_prices or master_token_prices.get(token_mint, Decimal(0)) == Decimal(0)
                     ]
                     
-                    if tokens_still_needing_price_after_cg:
-                        print(f"[INFO] Fetching prices from GeckoTerminal for {len(tokens_still_needing_price_after_cg)} tokens")
-                        gt_prices = await fetch_token_prices_geckoterminal(tokens_still_needing_price_after_cg, client)
-                        if gt_prices:
-                            for token_mint, price_val in gt_prices.items():
+                    if tokens_needing_fetch:
+                        print(f"[INFO] Fetching additional prices for {len(tokens_needing_fetch)} tokens for historical USD volume calculation")
+                        additional_prices = await fetch_token_prices_coingecko(tokens_needing_fetch, client)
+                        if additional_prices:
+                            for token_mint, price_val in additional_prices.items():
                                 if price_val > 0:
-                                    master_token_prices[token_mint] = price_val
-                                    token_price_sources[token_mint] = "GeckoTerminal"
-                                    print(f"[INFO] Updated price for {token_mint} ({TOKEN_SYMBOL_MAP.get(token_mint, 'Unknown')}): ${price_val} from GeckoTerminal")
-            
-            # Рассчитываем агрегированную статистику на основе исторических данных
-            total_hist_records = 0
-            sum_hist_trades_count = Decimal(0)
-            sum_hist_volume_base = Decimal(0) # Это объем в базовом токене *транзакции*, а не пула
-            sum_hist_usd_volume = Decimal(0)  # Эта переменная будет теперь заполняться по новой логике
-            sum_hist_buy_volume_base = Decimal(0)
-            sum_hist_sell_volume_base = Decimal(0)
-            base_token_symbol_for_hist = "N/A" 
-            
-            if historical_trades_data_list:
-                total_hist_records = len(historical_trades_data_list)
-                
-                base_token_addresses_list = [
-                    "So11111111111111111111111111111111111111112",
-                    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
-                    "eqKJTf1Do4MDPyKisMYqVaUFpkEFNHaFQRT8tYMfnUAn"
-                ]
-                determined_base_mint_for_display = "" 
-                if token0_address in base_token_addresses_list:
-                    determined_base_mint_for_display = token0_address
-                elif token1_address in base_token_addresses_list:
-                    determined_base_mint_for_display = token1_address
-                else:
-                    determined_base_mint_for_display = token1_address 
-                base_token_symbol_for_hist = TOKEN_SYMBOL_MAP.get(determined_base_mint_for_display, determined_base_mint_for_display[:6]+"...")
-
-                for record in historical_trades_data_list: 
-                    sum_hist_trades_count += Decimal(str(record.get('trades', 0) or 0))
-                    
-                    record_base_volume_str = record.get('volume')
-                    sum_hist_volume_base += Decimal(str(record_base_volume_str or '0'))
-                    
-                    sum_hist_buy_volume_base += Decimal(str(record.get('buy_volume', 0) or 0))
-                    sum_hist_sell_volume_base += Decimal(str(record.get('sell_volume', 0) or 0))
-
-                    usd_volume_direct_str = record.get('usd_volume')
-                    calculated_usd_this_record = Decimal(0)
-                    usd_volume_source_info = 'direct_from_api'
-
-                    if usd_volume_direct_str is not None:
-                        try:
-                            direct_decimal_val = Decimal(str(usd_volume_direct_str))
-                            if direct_decimal_val != Decimal(0):
-                                calculated_usd_this_record = direct_decimal_val
-                        except Exception: 
-                            usd_volume_direct_str = None 
-
-                    if usd_volume_direct_str is None or calculated_usd_this_record == Decimal(0):
-                        base_volume_for_calc_str = record.get('volume') 
-                        base_token_mint_for_record = record.get('Trade', {}).get('Side', {}).get('Currency', {}).get('MintAddress')
-
-                        if base_volume_for_calc_str is not None and base_token_mint_for_record:
-                            try:
-                                base_volume_decimal = Decimal(str(base_volume_for_calc_str))
-                                price_of_base_for_record = master_token_prices.get(base_token_mint_for_record, Decimal(0))
-
-                                if price_of_base_for_record > 0:
-                                    calculated_usd_this_record = base_volume_decimal * price_of_base_for_record
-                                    usd_volume_source_info = 'calculated_from_base_volume'
-                                    print(f"[DEBUG_CALC_USD] Calculated USD volume for record. Base Mint: {base_token_mint_for_record}, Base Vol: {base_volume_decimal}, Price: {price_of_base_for_record}, Result USD: {calculated_usd_this_record}")
-                                else:
-                                    usd_volume_source_info = f'calculation_failed_no_price_for_{base_token_mint_for_record}'
-                                    print(f"[DEBUG_CALC_USD] Failed to calculate USD volume for record. No price for Base Mint: {base_token_mint_for_record}")
-
-                            except Exception as e_calc:
-                                usd_volume_source_info = 'calculation_error'
-                                print(f"[DEBUG_CALC_USD] Error during USD calculation for record ({base_token_mint_for_record}): {e_calc}")
-                        else:
-                            usd_volume_source_info = 'missing_data_for_calculation'
-                            print(f"[DEBUG_CALC_USD] Missing data for USD calculation for record. Base Mint: {base_token_mint_for_record}, Base Vol Str: {base_volume_for_calc_str}")
-                    
-                    record['usd_volume'] = str(calculated_usd_this_record) 
-                    record['usd_volume_source_info'] = usd_volume_source_info 
-                    
-                    sum_hist_usd_volume += calculated_usd_this_record
-            
-            # Теперь рассчитаем долю ликвидности для каждой позиции
-            for pos in positions_in_this_main_pool:
-                if pool_tvl_usd > 0:
-                    pos_value_usd = Decimal(pos["position_value_usd"])
-                    pos["position_liquidity_share"] = str(pos_value_usd / pool_tvl_usd)
-                    pos["position_liquidity_share_percent"] = str((pos_value_usd / pool_tvl_usd) * 100)
-                else:
-                    pos["position_liquidity_share"] = "0"
-                    pos["position_liquidity_share_percent"] = "0"
-            
-            # Шаг 3: Анализируем каждую позицию в пуле для получения более точной информации
-            analyzed_positions = []
-            for position_data in positions_in_this_main_pool:
-                print(f"[INFO] Analyzing position {position_data['position_mint']} in pool {current_pool_id_from_list}")
-                
-                # Проверяем наличие ключей перед вызовом функции
-                if 'position_mint' in position_data and 'pool_id' in position_data:
-                    # Получаем position_pda, или используем position_mint как запасной вариант
-                    position_pda = position_data.get("position_pda", position_data['position_mint'])
-                    
-                    analyzed_position_details = await analyze_single_position(
-                        position_nft_mint=position_data["position_mint"],
-                        position_pda=position_pda,
-                        target_pool_id=position_data["pool_id"], 
-                        pool_onchain_state=target_pools_onchain_states.get(position_data["pool_id"]),
-                        token_prices=master_token_prices,  # Используем обновленный мастер-словарь
-                        rpc_url=HELIUS_RPC_URL,
-                        client=client
-                    )
-                    
-                    if analyzed_position_details:
-                        # Обновляем позицию с дополнительными данными
-                        for key, value in analyzed_position_details.items():
-                            # Всегда обновляем ключи token0_price_usd и token1_price_usd даже если они уже есть
-                            if key in ["token0_price_usd", "token1_price_usd", "position_usd_value"] or key not in position_data:
-                                position_data[key] = value
+                                    master_token_prices[token_mint] = Decimal(str(price_val))
+                                    token_price_sources[token_mint] = "CoinGecko"
+                                    print(f"[INFO] Updated price for {token_mint} ({TOKEN_SYMBOL_MAP.get(token_mint, 'Unknown')}): ${price_val} from CoinGecko")
                         
-                        analyzed_positions.append(position_data)
+                        # Проверяем, остались ли токены, для которых не смогли получить цены через CoinGecko
+                        tokens_still_needing_price_after_cg = [
+                            token_mint for token_mint in tokens_needing_fetch
+                            if token_mint not in master_token_prices or master_token_prices.get(token_mint, Decimal(0)) == Decimal(0)
+                        ]
+                        
+                        if tokens_still_needing_price_after_cg:
+                            print(f"[INFO] Fetching prices from GeckoTerminal for {len(tokens_still_needing_price_after_cg)} tokens")
+                            gt_prices = await fetch_token_prices_geckoterminal(tokens_still_needing_price_after_cg, client)
+                            if gt_prices:
+                                for token_mint, price_val in gt_prices.items():
+                                    if price_val > 0:
+                                        master_token_prices[token_mint] = price_val
+                                        token_price_sources[token_mint] = "GeckoTerminal"
+                                        print(f"[INFO] Updated price for {token_mint} ({TOKEN_SYMBOL_MAP.get(token_mint, 'Unknown')}): ${price_val} from GeckoTerminal")
+            
+                # Рассчитываем агрегированную статистику на основе исторических данных
+                total_hist_records = 0
+                sum_hist_trades_count = Decimal(0)
+                sum_hist_volume_base = Decimal(0) # Это объем в базовом токене *транзакции*, а не пула
+                sum_hist_usd_volume = Decimal(0)  # Эта переменная будет теперь заполняться по новой логике
+                sum_hist_buy_volume_base = Decimal(0)
+                sum_hist_sell_volume_base = Decimal(0)
+                base_token_symbol_for_hist = "N/A" 
+                
+                if historical_trades_data_list:
+                    total_hist_records = len(historical_trades_data_list)
+                    
+                    base_token_addresses_list = [
+                        "So11111111111111111111111111111111111111112",
+                        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+                        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+                        "eqKJTf1Do4MDPyKisMYqVaUFpkEFNHaFQRT8tYMfnUAn"
+                    ]
+                    determined_base_mint_for_display = "" 
+                    if token0_address in base_token_addresses_list:
+                        determined_base_mint_for_display = token0_address
+                    elif token1_address in base_token_addresses_list:
+                        determined_base_mint_for_display = token1_address
                     else:
-                        print(f"[WARN] Failed to analyze position {position_data['position_mint']}")
-                else:
-                    print(f"[WARN] Missing required keys in position_data: {position_data.keys()}")
-            
-            # Формируем данные пула для отчета
-            pool_specific_data = {
-                "id": current_pool_id_from_list,
-                "name": first_position["pool_name"],
-                "positions": positions_in_this_main_pool,
-                "mintA": {
-                    "address": first_position["token0"],
-                    "symbol": first_position["pool_name"].split('/')[0],
-                    "decimals": None,
-                    "price": master_token_prices.get(first_position["token0"], Decimal(0))  # Используем цену из мастер-словаря
-                },
-                "mintB": {
-                    "address": first_position["token1"],
-                    "symbol": first_position["pool_name"].split('/')[1],
-                    "decimals": None,
-                    "price": master_token_prices.get(first_position["token1"], Decimal(0))  # Используем цену из мастер-словаря
-                },
-                "price": first_position["current_price"],
-                "feeRate": first_position["fee_tier"],
-                "total_usd_value": sum(Decimal(pos["position_value_usd"]) for pos in positions_in_this_main_pool),
-                "in_range_positions": sum(1 for pos in positions_in_this_main_pool if pos["in_range"] is True),
-                "out_of_range_positions": sum(1 for pos in positions_in_this_main_pool if pos["in_range"] is False),
-                # Добавляем новые поля
-                "pool_tvl_usd": str(pool_tvl_usd),
-                "pool_24h_volume_usd": str(pool_24h_volume_usd),
-                "pool_7d_daily_volumes": daily_volumes_7d if daily_volumes_7d else [],
-                "token0_candles_7d_minute": token0_candles_7d if token0_candles_7d else [],
-                "token1_candles_7d_minute": token1_candles_7d if token1_candles_7d else [],
-                # Добавляем исторические данные о торгах
-                "pool_7d_historical_trades_list": historical_trades_data_list if historical_trades_data_list else [],
-                "pool_7d_historical_summary": {
-                    "records_count": total_hist_records,
-                    "total_trades_count": str(sum_hist_trades_count),
-                    "total_volume_base_token": str(sum_hist_volume_base),
-                    "base_token_symbol": base_token_symbol_for_hist,
-                    "total_usd_volume": str(sum_hist_usd_volume),
-                    "total_buy_volume_base_token": str(sum_hist_buy_volume_base),
-                    "total_sell_volume_base_token": str(sum_hist_sell_volume_base)
+                        determined_base_mint_for_display = token1_address 
+                    base_token_symbol_for_hist = TOKEN_SYMBOL_MAP.get(determined_base_mint_for_display, determined_base_mint_for_display[:6]+"...")
+
+                    for record in historical_trades_data_list: 
+                        sum_hist_trades_count += Decimal(str(record.get('trades', 0) or 0))
+                        
+                        record_base_volume_str = record.get('volume')
+                        sum_hist_volume_base += Decimal(str(record_base_volume_str or '0'))
+                        
+                        sum_hist_buy_volume_base += Decimal(str(record.get('buy_volume', 0) or 0))
+                        sum_hist_sell_volume_base += Decimal(str(record.get('sell_volume', 0) or 0))
+
+                        usd_volume_direct_str = record.get('usd_volume')
+                        calculated_usd_this_record = Decimal(0)
+                        usd_volume_source_info = 'direct_from_api'
+
+                        if usd_volume_direct_str is not None:
+                            try:
+                                direct_decimal_val = Decimal(str(usd_volume_direct_str))
+                                if direct_decimal_val != Decimal(0):
+                                    calculated_usd_this_record = direct_decimal_val
+                            except Exception: 
+                                usd_volume_direct_str = None 
+
+                        if usd_volume_direct_str is None or calculated_usd_this_record == Decimal(0):
+                            base_volume_for_calc_str = record.get('volume') 
+                            base_token_mint_for_record = record.get('Trade', {}).get('Side', {}).get('Currency', {}).get('MintAddress')
+
+                            if base_volume_for_calc_str is not None and base_token_mint_for_record:
+                                try:
+                                    base_volume_decimal = Decimal(str(base_volume_for_calc_str))
+                                    price_of_base_for_record = master_token_prices.get(base_token_mint_for_record, Decimal(0))
+
+                                    if price_of_base_for_record > 0:
+                                        calculated_usd_this_record = base_volume_decimal * price_of_base_for_record
+                                        usd_volume_source_info = 'calculated_from_base_volume'
+                                        print(f"[DEBUG_CALC_USD] Calculated USD volume for record. Base Mint: {base_token_mint_for_record}, Base Vol: {base_volume_decimal}, Price: {price_of_base_for_record}, Result USD: {calculated_usd_this_record}")
+                                    else:
+                                        usd_volume_source_info = f'calculation_failed_no_price_for_{base_token_mint_for_record}'
+                                        print(f"[DEBUG_CALC_USD] Failed to calculate USD volume for record. No price for Base Mint: {base_token_mint_for_record}")
+
+                                except Exception as e_calc:
+                                    usd_volume_source_info = 'calculation_error'
+                                    print(f"[DEBUG_CALC_USD] Error during USD calculation for record ({base_token_mint_for_record}): {e_calc}")
+                            else:
+                                usd_volume_source_info = 'missing_data_for_calculation'
+                                print(f"[DEBUG_CALC_USD] Missing data for USD calculation for record. Base Mint: {base_token_mint_for_record}, Base Vol Str: {base_volume_for_calc_str}")
+                        
+                        record['usd_volume'] = str(calculated_usd_this_record) 
+                        record['usd_volume_source_info'] = usd_volume_source_info 
+                        
+                        sum_hist_usd_volume += calculated_usd_this_record
+                
+                # Теперь рассчитаем долю ликвидности для каждой позиции
+                for pos in positions_in_this_main_pool:
+                    if pool_tvl_usd > 0:
+                        pos_value_usd = Decimal(pos["position_value_usd"])
+                        pos["position_liquidity_share"] = str(pos_value_usd / pool_tvl_usd)
+                        pos["position_liquidity_share_percent"] = str((pos_value_usd / pool_tvl_usd) * 100)
+                    else:
+                        pos["position_liquidity_share"] = "0"
+                        pos["position_liquidity_share_percent"] = "0"
+                    
+                    # Добавляем поле fees_usd для всех позиций, если оно еще не было добавлено
+                    if 'fees_usd' not in pos:
+                        if 'total_pending_yield_usd_str' in pos:
+                            try:
+                                fees_usd_value = float(pos['total_pending_yield_usd_str'])
+                                pos['fees_usd'] = fees_usd_value
+                                print(f"[INFO] Added fees_usd={fees_usd_value} from total_pending_yield_usd_str for position {pos['position_mint']}")
+                            except (ValueError, TypeError) as e:
+                                print(f"[WARN] Could not convert total_pending_yield_usd_str to float for position {pos['position_mint']}: {e}")
+                                pos['fees_usd'] = 0.0
+                        elif 'unclaimed_fees_total_usd_str' in pos:
+                            try:
+                                fees_usd_value = float(pos['unclaimed_fees_total_usd_str'])
+                                pos['fees_usd'] = fees_usd_value
+                                print(f"[INFO] Added fees_usd={fees_usd_value} from unclaimed_fees_total_usd_str for position {pos['position_mint']}")
+                            except (ValueError, TypeError) as e:
+                                print(f"[WARN] Could not convert unclaimed_fees_total_usd_str to float for position {pos['position_mint']}: {e}")
+                                pos['fees_usd'] = 0.0
+                        else:
+                            print(f"[WARN] No fees data found for position {pos['position_mint']}, setting fees_usd=0.0")
+                            pos['fees_usd'] = 0.0
+                
+                # Шаг 3: Анализируем каждую позицию в пуле для получения более точной информации
+                analyzed_positions = []
+                for position_data in positions_in_this_main_pool:
+                    print(f"[INFO] Analyzing position {position_data['position_mint']} in pool {current_pool_id_from_list}")
+                    
+                    # Проверяем наличие ключей перед вызовом функции
+                    if 'position_mint' in position_data and 'pool_id' in position_data:
+                        # Получаем position_pda, или используем position_mint как запасной вариант
+                        position_pda = position_data.get("position_pda", position_data['position_mint'])
+                        
+                        analyzed_position_details = await analyze_single_position(
+                            position_nft_mint=position_data["position_mint"],
+                            position_pda=position_pda,
+                            target_pool_id=position_data["pool_id"], 
+                            pool_onchain_state=target_pools_onchain_states.get(position_data["pool_id"]),
+                            token_prices=master_token_prices,  # Используем обновленный мастер-словарь
+                            rpc_url=HELIUS_RPC_URL,
+                            client=client
+                        )
+                        
+                        if analyzed_position_details:
+                            # Обновляем позицию с дополнительными данными
+                            for key, value in analyzed_position_details.items():
+                                # Всегда обновляем ключи token0_price_usd и token1_price_usd даже если они уже есть
+                                if key in ["token0_price_usd", "token1_price_usd", "position_usd_value"] or key not in position_data:
+                                    position_data[key] = value
+                            
+                            analyzed_positions.append(position_data)
+                        else:
+                            print(f"[WARN] Failed to analyze position {position_data['position_mint']}")
+                    else:
+                        print(f"[WARN] Missing required keys in position_data: {position_data.keys()}")
+                
+                # Формируем данные пула для отчета
+                pool_specific_data = {
+                    "id": current_pool_id_from_list,
+                    "name": first_position["pool_name"],
+                    "positions": positions_in_this_main_pool,
+                    "mintA": {
+                        "address": first_position["token0"],
+                        "symbol": first_position["pool_name"].split('/')[0],
+                        "decimals": None,
+                        "price": master_token_prices.get(first_position["token0"], Decimal(0))  # Используем цену из мастер-словаря
+                    },
+                    "mintB": {
+                        "address": first_position["token1"],
+                        "symbol": first_position["pool_name"].split('/')[1],
+                        "decimals": None,
+                        "price": master_token_prices.get(first_position["token1"], Decimal(0))  # Используем цену из мастер-словаря
+                    },
+                    "price": first_position["current_price"],
+                    "feeRate": first_position["fee_tier"],
+                    "total_usd_value": sum(Decimal(pos["position_value_usd"]) for pos in positions_in_this_main_pool),
+                    "in_range_positions": sum(1 for pos in positions_in_this_main_pool if pos["in_range"] is True),
+                    "out_of_range_positions": sum(1 for pos in positions_in_this_main_pool if pos["in_range"] is False),
+                    # Добавляем новые поля
+                    "pool_tvl_usd": str(pool_tvl_usd),
+                    "pool_24h_volume_usd": str(pool_24h_volume_usd),
+                    "pool_7d_daily_volumes": daily_volumes_7d if daily_volumes_7d else [],
+                    "token0_candles_7d_minute": token0_candles_7d if token0_candles_7d else [],
+                    "token1_candles_7d_minute": token1_candles_7d if token1_candles_7d else [],
+                    # Добавляем исторические данные о торгах
+                    "pool_7d_historical_trades_list": historical_trades_data_list if historical_trades_data_list else [],
+                    "pool_7d_historical_summary": {
+                        "records_count": total_hist_records,
+                        "total_trades_count": str(sum_hist_trades_count),
+                        "total_volume_base_token": str(sum_hist_volume_base),
+                        "base_token_symbol": base_token_symbol_for_hist,
+                        "total_usd_volume": str(sum_hist_usd_volume),
+                        "total_buy_volume_base_token": str(sum_hist_buy_volume_base),
+                        "total_sell_volume_base_token": str(sum_hist_sell_volume_base)
+                    }
                 }
-            }
+                
+                # Добавляем данные текущего пула в общий список
+                detailed_report_data_for_primary_pools.append(pool_specific_data)
+                
+                # Дублируем данные пула в Supabase (асинхронно в фоне)
+                print(f"[INFO] Starting pool data duplication to Supabase in background for pool {pool_specific_data.get('name', 'N/A')}...")
+                asyncio.create_task(duplicate_pool_data_to_supabase(pool_specific_data))
+                
+            # Завершение анализа
+            end_time = datetime.now()
+            total_time = end_time - start_time
             
-            # Добавляем данные текущего пула в общий список
-            detailed_report_data_for_primary_pools.append(pool_specific_data)
+            print(f"{'=' * 50}")
+            print(f"Analysis completed at: {end_time.isoformat()}")
+            print(f"Total execution time: {total_time}")
+            print(f"Analyzed {len(detailed_report_data_for_primary_pools)} pools")
+            print(f"{'=' * 50}")
             
-            # Дублируем данные пула в Supabase
-            print(f"[INFO] Duplicating pool data to Supabase for pool {pool_specific_data.get('name', 'N/A')}...")
-            pool_duplication_success = await duplicate_pool_data_to_supabase(pool_specific_data)
-            if pool_duplication_success:
-                print(f"[INFO] ✅ Pool data successfully duplicated to Supabase: {pool_specific_data.get('name', 'N/A')}")
-            else:
-                print(f"[WARN] ⚠️ Pool data duplication to Supabase failed: {pool_specific_data.get('name', 'N/A')}")
+            # Сохраняем отчет в файл для Telegram бота
+            await save_report_to_file(detailed_report_data_for_primary_pools, master_token_prices, start_time, end_time)
             
+            return detailed_report_data_for_primary_pools
+
+async def save_report_to_file(pools_data: List[Dict[str, Any]], token_prices: Dict[str, Decimal], start_time: datetime, end_time: datetime) -> str:
+    """
+    Сохраняет отчет о пулах в текстовый файл для использования Telegram ботом
+    """
+    try:
+        # Генерируем имя файла с timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"raydium_pool_report_{timestamp}.txt"
+        
+        # Подготавливаем данные для отчета
+        total_positions = sum(len(pool.get('positions', [])) for pool in pools_data)
+        total_value = sum(float(pool.get('total_usd_value', 0)) for pool in pools_data)
+        
+        # Создаем отчет
+        report_lines = []
+        
+        # Заголовок
+        report_lines.append("=" * 60)
+        report_lines.append("RAYDIUM POOLS ANALYSIS REPORT")
+        report_lines.append("=" * 60)
+        report_lines.append("")
+        report_lines.append(f"Generated: {end_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        report_lines.append(f"Execution time: {end_time - start_time}")
+        report_lines.append(f"Wallet: {TARGET_WALLET_ADDRESS}")
+        report_lines.append(f"Total Pools Analyzed: {len(pools_data)}")
+        report_lines.append(f"Total Positions: {total_positions}")
+        report_lines.append(f"Общая стоимость всех позиций: ${total_value:,.2f}")
+        report_lines.append("")
+        
+        # Детали по каждому пулу
+        for i, pool in enumerate(pools_data, 1):
+            pool_name = pool.get('name', 'Unknown Pool')
+            pool_tvl = float(pool.get('pool_tvl_usd', 0))
+            pool_volume_24h = float(pool.get('pool_24h_volume_usd', 0))
+            pool_positions = pool.get('positions', [])
+            pool_value = float(pool.get('total_usd_value', 0))
+            
+            report_lines.append(f"POOL {i}: {pool_name}")
+            report_lines.append("-" * 40)
+            report_lines.append("")
+            
+            # TVL и объемы
+            report_lines.append("TVL & VOLUMES:")
+            report_lines.append(f"  Pool TVL: ${pool_tvl:,.2f}")
+            report_lines.append(f"  24h Volume: ${pool_volume_24h:,.2f}")
+            
+            # Дневные объемы за 7 дней
+            daily_volumes = pool.get('pool_7d_daily_volumes', [])
+            if daily_volumes:
+                report_lines.append("")
+                report_lines.append("Daily volumes (7d):")
+                for dv in daily_volumes[-7:]:  # Последние 7 дней
+                    volume = float(dv.get('daily_usd_volume', 0))
+                    report_lines.append(f"  {dv.get('date', 'N/A')}: ${volume:,.2f}")
+            
+            report_lines.append("")
+            
+            # Позиции
+            report_lines.append("POSITIONS:")
+            report_lines.append(f"  Active positions: {len(pool_positions)}")
+            report_lines.append(f"  Total position value: ${pool_value:,.2f}")
+            
+            # Рассчитываем общие комиссии
+            total_fees = sum(float(pos.get('fees_usd', 0)) for pos in pool_positions)
+            report_lines.append(f"  Pending yield (fees): ${total_fees:,.2f}")
+            
+            # In-range статистика
+            in_range_count = pool.get('in_range_positions', 0)
+            out_range_count = pool.get('out_of_range_positions', 0)
+            report_lines.append(f"  In range: {in_range_count}, Out of range: {out_range_count}")
+            
+            # Детали позиций
+            if pool_positions:
+                report_lines.append("")
+                report_lines.append("Position details:")
+                for j, pos in enumerate(pool_positions, 1):
+                    pos_value = float(pos.get('position_value_usd', 0))
+                    pos_fees = float(pos.get('fees_usd', 0))
+                    pos_mint = pos.get('position_mint', 'N/A')[:8] + "..."
+                    in_range_status = "✅ In range" if pos.get('in_range', False) else "❌ Out of range"
+                    
+                    report_lines.append(f"  {j}. NFT: {pos_mint}")
+                    report_lines.append(f"     Value: ${pos_value:,.2f}")
+                    report_lines.append(f"     Fees: ${pos_fees:,.2f}")
+                    report_lines.append(f"     Status: {in_range_status}")
+            
+            report_lines.append("")
+            report_lines.append("-" * 40)
+            report_lines.append("")
+        
+        # Итоговая статистика
+        report_lines.append("SUMMARY:")
+        report_lines.append(f"Total portfolio value: ${total_value:,.2f}")
+        report_lines.append(f"Total positions across all pools: {total_positions}")
+        
+        total_fees_all = sum(
+            sum(float(pos.get('fees_usd', 0)) for pos in pool.get('positions', []))
+            for pool in pools_data
+        )
+        report_lines.append(f"Total pending yield: ${total_fees_all:,.2f}")
+        
+        report_lines.append("")
+        report_lines.append("=" * 60)
+        report_lines.append("Report generated by Raydium Pool Analyzer")
+        report_lines.append("Next analysis: Automated schedule")
+        report_lines.append("=" * 60)
+        
+        # Сохраняем в файл
+        report_content = "\n".join(report_lines)
+        
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write(report_content)
+        
+        print(f"[INFO] ✅ Report saved to file: {filename}")
+        print(f"[INFO] Report contains {len(report_lines)} lines, {len(report_content)} characters")
+        
+        return filename
+        
+    except Exception as e:
+        print(f"[ERROR] Failed to save report to file: {e}")
+        return ""
+
+# Точка входа для запуска скрипта
+if __name__ == "__main__":
+    asyncio.run(main())

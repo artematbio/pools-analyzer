@@ -69,6 +69,9 @@ class RaydiumScheduler:
         self.running = False
         self.startup_time = datetime.now(timezone.utc)
         
+        # Enable fast analyzer mode for scheduled tasks
+        self._use_fast_analyzer = False
+        
         # System state
         self.system_health = {
             'status': 'healthy',
@@ -85,7 +88,7 @@ class RaydiumScheduler:
         # Setup tasks
         self._setup_scheduled_tasks()
         
-        logging.info("Raydium Scheduler initialized")
+        logging.info("Raydium Scheduler initialized with fast analyzer mode disabled")
     
     def _setup_scheduled_tasks(self):
         """Setup all scheduled tasks"""
@@ -391,15 +394,36 @@ class RaydiumScheduler:
             logging.info(f"Current directory: {current_dir}")
             logging.info(f"Existing report files before analysis: {len(existing_reports)}")
             
+            # Try fast analyzer first (for scheduled tasks)
+            if hasattr(self, '_use_fast_analyzer') and self._use_fast_analyzer:
+                logging.info("Using fast pool analyzer for scheduled task...")
+                script_name = 'pool_analyzer_fast.py'
+                timeout = 120  # 2 minutes for fast analyzer
+            else:
+                logging.info("Using optimized main pool analyzer...")
+                script_name = 'pool_analyzer.py'
+                timeout = 240  # 4 minutes for optimized analyzer (was 10 minutes)
+            
             # Run the pool analyzer
             result = subprocess.run([
-                'python3', 'pool_analyzer.py'
-            ], capture_output=True, text=True, timeout=300)  # 5 minute timeout
+                'python3', script_name
+            ], capture_output=True, text=True, timeout=timeout)
             
             if result.returncode != 0:
                 logging.error(f"Pool analyzer stdout: {result.stdout}")
                 logging.error(f"Pool analyzer stderr: {result.stderr}")
-                raise Exception(f"Pool analyzer failed: {result.stderr}")
+                
+                # If fast analyzer failed, try full analyzer as fallback
+                if script_name == 'pool_analyzer_fast.py':
+                    logging.info("Fast analyzer failed, trying full analyzer as fallback...")
+                    result = subprocess.run([
+                        'python3', 'pool_analyzer.py'
+                    ], capture_output=True, text=True, timeout=600)
+                    
+                    if result.returncode != 0:
+                        raise Exception(f"Both analyzers failed. Last error: {result.stderr}")
+                else:
+                    raise Exception(f"Pool analyzer failed: {result.stderr}")
             
             # Find the latest report file
             report_files = glob.glob('raydium_pool_report_*.txt')
@@ -412,9 +436,19 @@ class RaydiumScheduler:
             latest_report = max(report_files, key=os.path.getctime)
             logging.info(f"Found latest report file: {latest_report}")
             
+            # Check if report is recent (generated in last 5 minutes)
+            report_time = os.path.getctime(latest_report)
+            current_time = time.time()
+            if current_time - report_time > 300:  # 5 minutes
+                logging.warning(f"Report file is old: {datetime.fromtimestamp(report_time)}")
+                # Still proceed but log the warning
+            
             # Read and format the report
             with open(latest_report, 'r') as f:
                 report_content = f.read()
+            
+            if len(report_content) < 100:  # Sanity check
+                raise Exception(f"Report file seems too small: {len(report_content)} characters")
             
             logging.info(f"Report content length: {len(report_content)} characters")
             
@@ -453,10 +487,15 @@ class RaydiumScheduler:
             logging.info(f"Pool analysis completed successfully. Report saved: {latest_report}")
             
         except subprocess.TimeoutExpired:
-            raise Exception("Pool analysis timed out after 5 minutes")
+            raise Exception(f"Pool analysis timed out after {timeout} seconds")
         except Exception as e:
             logging.error(f"Pool analysis failed: {e}")
             raise
+    
+    def set_fast_analyzer_mode(self, use_fast: bool = True):
+        """Set whether to use fast analyzer for scheduled tasks"""
+        self._use_fast_analyzer = use_fast
+        logging.info(f"Fast analyzer mode: {'enabled' if use_fast else 'disabled'}")
 
     async def _cleanup_old_report_files(self):
         """Clean up report files older than 14 days to save space"""

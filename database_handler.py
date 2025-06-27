@@ -24,6 +24,7 @@ class SupabaseHandler:
     """
     Класс для работы с Supabase базой данных
     Дублирует данные из PostgreSQL в Supabase
+    Все таблицы имеют префикс lp_ (liquidity pools)
     """
     
     def __init__(self):
@@ -87,7 +88,7 @@ class SupabaseHandler:
                 
             converted_data = self._convert_data(alert_data)
             
-            result = self.client.table('alerts').insert(converted_data).execute()
+            result = self.client.table('lp_alerts').insert(converted_data).execute()
             
             if result.data:
                 logging.info(f"✅ Alert сохранен в Supabase: {alert_data.get('title', 'N/A')}")
@@ -110,7 +111,7 @@ class SupabaseHandler:
             converted_data = self._convert_data(price_data)
             
             # Проверяем, есть ли уже запись для этого токена и времени
-            existing = self.client.table('token_prices').select('id').eq(
+            existing = self.client.table('lp_token_prices').select('id').eq(
                 'token_address', price_data.get('token_address')
             ).eq(
                 'timestamp', price_data.get('timestamp')
@@ -118,19 +119,19 @@ class SupabaseHandler:
             
             if existing.data:
                 # Обновляем существующую запись
-                result = self.client.table('token_prices').update(
+                result = self.client.table('lp_token_prices').update(
                     converted_data
                 ).eq('id', existing.data[0]['id']).execute()
                 
                 if result.data:
-                    logging.info(f"✅ Цена токена обновлена: {price_data.get('token_symbol', 'N/A')}")
+                    logging.info(f"✅ Цена токена обновлена: {price_data.get('symbol', 'N/A')}")
                     return existing.data[0]['id']
             else:
                 # Создаем новую запись
-                result = self.client.table('token_prices').insert(converted_data).execute()
+                result = self.client.table('lp_token_prices').insert(converted_data).execute()
                 
                 if result.data:
-                    logging.info(f"✅ Цена токена сохранена: {price_data.get('token_symbol', 'N/A')}")
+                    logging.info(f"✅ Цена токена сохранена: {price_data.get('symbol', 'N/A')}")
                     return result.data[0].get('id')
                     
             return None
@@ -149,7 +150,7 @@ class SupabaseHandler:
             converted_data = self._convert_data(tx_data)
             
             # Проверяем дубликаты по tx_hash
-            existing = self.client.table('treasury_transactions').select('id').eq(
+            existing = self.client.table('lp_treasury_transactions').select('id').eq(
                 'tx_hash', tx_data.get('tx_hash')
             ).execute()
             
@@ -157,7 +158,7 @@ class SupabaseHandler:
                 logging.info(f"⚠️ Транзакция уже существует: {tx_data.get('tx_hash', 'N/A')}")
                 return existing.data[0]['id']
             
-            result = self.client.table('treasury_transactions').insert(converted_data).execute()
+            result = self.client.table('lp_treasury_transactions').insert(converted_data).execute()
             
             if result.data:
                 logging.info(f"✅ Treasury транзакция сохранена: {tx_data.get('tx_hash', 'N/A')}")
@@ -179,7 +180,7 @@ class SupabaseHandler:
                 
             converted_data = self._convert_data(balance_data)
             
-            result = self.client.table('balance_snapshots').insert(converted_data).execute()
+            result = self.client.table('lp_balance_snapshots').insert(converted_data).execute()
             
             if result.data:
                 logging.info(f"✅ Снимок баланса сохранен: {balance_data.get('dao_name', 'N/A')}")
@@ -201,10 +202,10 @@ class SupabaseHandler:
                 
             converted_data = self._convert_data(activity_data)
             
-            result = self.client.table('pool_activities').insert(converted_data).execute()
+            result = self.client.table('lp_pool_activities').insert(converted_data).execute()
             
             if result.data:
-                logging.info(f"✅ Активность пула сохранена: {activity_data.get('pool_address', 'N/A')}")
+                logging.info(f"✅ Активность пула сохранена: {activity_data.get('pool_name', 'N/A')}")
                 return result.data[0].get('id')
             else:
                 logging.error(f"❌ Не удалось сохранить активность пула: {activity_data}")
@@ -214,45 +215,29 @@ class SupabaseHandler:
             logging.error(f"❌ Ошибка сохранения активности пула: {e}")
             return None
     
-    # === POOL DATA ===
+    # === POOL SNAPSHOTS ===
     def save_pool_snapshot(self, pool_data: Dict[str, Any]) -> Optional[str]:
-        """Сохранить снимок данных пула в Supabase"""
+        """Сохранить снимок пула в Supabase"""
         try:
             if not self.is_connected():
                 return None
                 
             converted_data = self._convert_data(pool_data)
             
-            # Проверяем существующую запись для этого пула и времени
-            existing = self.client.table('pool_snapshots').select('id').eq(
-                'pool_id', pool_data.get('pool_id')
-            ).eq(
-                'timestamp', pool_data.get('timestamp')
-            ).execute()
+            result = self.client.table('lp_pool_snapshots').insert(converted_data).execute()
             
-            if existing.data:
-                # Обновляем существующую запись
-                result = self.client.table('pool_snapshots').update(
-                    converted_data
-                ).eq('id', existing.data[0]['id']).execute()
-                
-                if result.data:
-                    logging.info(f"✅ Данные пула обновлены: {pool_data.get('pool_name', 'N/A')}")
-                    return existing.data[0]['id']
+            if result.data:
+                logging.info(f"✅ Снимок пула сохранен: {pool_data.get('pool_name', 'N/A')}")
+                return result.data[0].get('id')
             else:
-                # Создаем новую запись
-                result = self.client.table('pool_snapshots').insert(converted_data).execute()
-                
-                if result.data:
-                    logging.info(f"✅ Снимок пула сохранен: {pool_data.get('pool_name', 'N/A')}")
-                    return result.data[0].get('id')
-                    
-            return None
+                logging.error(f"❌ Не удалось сохранить снимок пула: {pool_data}")
+                return None
                 
         except Exception as e:
             logging.error(f"❌ Ошибка сохранения снимка пула: {e}")
             return None
     
+    # === POSITION SNAPSHOTS ===
     def save_position_snapshot(self, position_data: Dict[str, Any]) -> Optional[str]:
         """Сохранить снимок позиции в Supabase"""
         try:
@@ -261,48 +246,32 @@ class SupabaseHandler:
                 
             converted_data = self._convert_data(position_data)
             
-            # Проверяем существующую запись для этой позиции и времени
-            existing = self.client.table('position_snapshots').select('id').eq(
-                'position_mint', position_data.get('position_mint')
-            ).eq(
-                'timestamp', position_data.get('timestamp')
-            ).execute()
+            result = self.client.table('lp_position_snapshots').insert(converted_data).execute()
             
-            if existing.data:
-                # Обновляем существующую запись
-                result = self.client.table('position_snapshots').update(
-                    converted_data
-                ).eq('id', existing.data[0]['id']).execute()
-                
-                if result.data:
-                    logging.info(f"✅ Данные позиции обновлены: {position_data.get('position_mint', 'N/A')}")
-                    return existing.data[0]['id']
+            if result.data:
+                logging.info(f"✅ Снимок позиции сохранен: {position_data.get('position_mint', 'N/A')}")
+                return result.data[0].get('id')
             else:
-                # Создаем новую запись
-                result = self.client.table('position_snapshots').insert(converted_data).execute()
-                
-                if result.data:
-                    logging.info(f"✅ Снимок позиции сохранен: {position_data.get('position_mint', 'N/A')}")
-                    return result.data[0].get('id')
-                    
-            return None
+                logging.error(f"❌ Не удалось сохранить снимок позиции: {position_data}")
+                return None
                 
         except Exception as e:
             logging.error(f"❌ Ошибка сохранения снимка позиции: {e}")
             return None
     
+    # === POOL VOLUMES ===
     def save_pool_volume_data(self, volume_data: Dict[str, Any]) -> Optional[str]:
-        """Сохранить данные объема торгов пула"""
+        """Сохранить данные объема пула в Supabase"""
         try:
             if not self.is_connected():
                 return None
                 
             converted_data = self._convert_data(volume_data)
             
-            result = self.client.table('pool_volumes').insert(converted_data).execute()
+            result = self.client.table('lp_pool_volumes').insert(converted_data).execute()
             
             if result.data:
-                logging.info(f"✅ Данные объема пула сохранены: {volume_data.get('pool_id', 'N/A')}")
+                logging.info(f"✅ Данные объема пула сохранены: {volume_data.get('pool_name', 'N/A')} - {volume_data.get('date', 'N/A')}")
                 return result.data[0].get('id')
             else:
                 logging.error(f"❌ Не удалось сохранить данные объема пула: {volume_data}")
@@ -311,28 +280,32 @@ class SupabaseHandler:
         except Exception as e:
             logging.error(f"❌ Ошибка сохранения данных объема пула: {e}")
             return None
-
+    
     # === BATCH OPERATIONS ===
     def save_batch_data(self, table_name: str, data_list: List[Dict[str, Any]]) -> int:
-        """Сохранить данные батчем"""
+        """Сохранить множество записей одновременно"""
         try:
             if not self.is_connected() or not data_list:
                 return 0
                 
-            converted_data = [self._convert_data(item) for item in data_list]
+            # Добавляем префикс lp_ если его нет
+            if not table_name.startswith('lp_'):
+                table_name = f'lp_{table_name}'
+                
+            converted_data_list = [self._convert_data(data) for data in data_list]
             
-            result = self.client.table(table_name).insert(converted_data).execute()
+            result = self.client.table(table_name).insert(converted_data_list).execute()
             
             if result.data:
-                count = len(result.data)
-                logging.info(f"✅ Сохранено {count} записей в {table_name}")
-                return count
+                success_count = len(result.data)
+                logging.info(f"✅ Batch операция выполнена: {success_count}/{len(data_list)} записей в {table_name}")
+                return success_count
             else:
-                logging.error(f"❌ Не удалось сохранить batch в {table_name}")
+                logging.error(f"❌ Не удалось выполнить batch операцию для {table_name}")
                 return 0
                 
         except Exception as e:
-            logging.error(f"❌ Ошибка batch сохранения в {table_name}: {e}")
+            logging.error(f"❌ Ошибка batch операции: {e}")
             return 0
     
     # === QUERY METHODS ===
@@ -342,7 +315,7 @@ class SupabaseHandler:
             if not self.is_connected():
                 return []
                 
-            result = self.client.table('alerts').select('*').order(
+            result = self.client.table('lp_alerts').select('*').order(
                 'timestamp', desc=True
             ).limit(limit).execute()
             
@@ -358,7 +331,7 @@ class SupabaseHandler:
             if not self.is_connected():
                 return []
                 
-            result = self.client.table('token_prices').select('*').eq(
+            result = self.client.table('lp_token_prices').select('*').eq(
                 'token_address', token_address
             ).order('timestamp', desc=True).limit(limit).execute()
             
@@ -374,7 +347,7 @@ class SupabaseHandler:
             if not self.is_connected():
                 return []
                 
-            query = self.client.table('treasury_transactions').select('*')
+            query = self.client.table('lp_treasury_transactions').select('*')
             
             if dao_name:
                 query = query.eq('dao_name', dao_name)
@@ -384,10 +357,9 @@ class SupabaseHandler:
             return result.data if result.data else []
             
         except Exception as e:
-            logging.error(f"❌ Ошибка получения транзакций: {e}")
+            logging.error(f"❌ Ошибка получения транзакций treasury: {e}")
             return []
     
-    # === STATISTICS ===
     def get_database_stats(self) -> Dict[str, Any]:
         """Получить статистику базы данных"""
         try:
@@ -395,17 +367,26 @@ class SupabaseHandler:
                 return {}
                 
             stats = {}
-            tables = ['alerts', 'token_prices', 'treasury_transactions', 'balance_snapshots', 'pool_activities']
+            
+            # Список таблиц с префиксом lp_
+            tables = [
+                'lp_alerts', 'lp_token_prices', 'lp_treasury_transactions',
+                'lp_balance_snapshots', 'lp_pool_activities', 'lp_pool_snapshots',
+                'lp_pool_volumes', 'lp_position_snapshots'
+            ]
             
             for table in tables:
-                result = self.client.table(table).select('*', count='exact').limit(1).execute()
-                stats[table] = result.count if hasattr(result, 'count') else 0
-                
+                try:
+                    result = self.client.table(table).select('id', count='exact').execute()
+                    stats[table] = result.count if hasattr(result, 'count') else 0
+                except:
+                    stats[table] = 0
+                    
             return stats
             
         except Exception as e:
-            logging.error(f"❌ Ошибка получения статистики: {e}")
+            logging.error(f"❌ Ошибка получения статистики БД: {e}")
             return {}
 
-# Создаем глобальный экземпляр
-supabase_handler = SupabaseHandler() 
+# Глобальный экземпляр для использования в других модулях
+supabase_handler = SupabaseHandler() if Client else None 
