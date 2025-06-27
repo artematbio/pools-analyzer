@@ -48,33 +48,61 @@ class ReportFormatter:
                 'generation_time': ''
             }
             
-            # Extract wallet address
-            wallet_match = re.search(r'Анализируемый кошелек:\s*([A-Za-z0-9]+)', content)
+            # Extract wallet address - updated for English format
+            wallet_match = re.search(r'Wallet:\s*([A-Za-z0-9]+)', content)
+            if not wallet_match:
+                # Fallback to Russian format
+                wallet_match = re.search(r'Анализируемый кошелек:\s*([A-Za-z0-9]+)', content)
             if wallet_match:
                 data['wallet'] = wallet_match.group(1)
             
-            # Extract total statistics
-            total_pos_match = re.search(r'Всего CLMM позиций:\s*(\d+)', content)
+            # Extract total statistics - updated for English format
+            total_pos_match = re.search(r'Total Positions:\s*(\d+)', content)
+            if not total_pos_match:
+                # Fallback to Russian format
+                total_pos_match = re.search(r'Всего CLMM позиций:\s*(\d+)', content)
             if total_pos_match:
                 data['total_positions'] = int(total_pos_match.group(1))
             
-            total_val_match = re.search(r'Общая стоимость всех позиций:\s*\$([0-9,]+\.?\d*)', content)
+            # Extract total value - try both English and Russian formats
+            total_val_match = re.search(r'Total Value:\s*\$([0-9,]+\.?\d*)', content)
+            if not total_val_match:
+                total_val_match = re.search(r'Общая стоимость всех позиций:\s*\$([0-9,]+\.?\d*)', content)
             if total_val_match:
                 data['total_value'] = float(total_val_match.group(1).replace(',', ''))
             
-            # Extract generation time
-            time_match = re.search(r'Дата формирования:\s*([0-9.]+\s+[0-9:]+)', content)
+            # Extract generation time - updated for English format
+            time_match = re.search(r'Generated:\s*([0-9-]+\s+[0-9:]+)', content)
+            if not time_match:
+                # Fallback to Russian format
+                time_match = re.search(r'Дата формирования:\s*([0-9.]+\s+[0-9:]+)', content)
             if time_match:
                 data['generation_time'] = time_match.group(1)
             
-            # Extract pool data
-            pool_pattern = r'--- АНАЛИЗ ПУЛА: ([^(]+)\s*\(([^)]+)\) ---(.*?)(?=--- АНАЛИЗ ПУЛА:|ДРУГИЕ ПУЛЫ|ОБЩАЯ СТАТИСТИКА|$)'
+            # Extract pool data - updated for English format
+            pool_pattern = r'POOL \d+:\s*([^-\n]+).*?(?=POOL \d+:|SUMMARY:|$)'
             pool_matches = re.findall(pool_pattern, content, re.DOTALL)
             
-            for pool_name, pool_id, pool_content in pool_matches:
-                pool_data = self._parse_pool_section(pool_name.strip(), pool_id.strip(), pool_content)
-                if pool_data:
-                    data['pools'].append(pool_data)
+            # If no English pools found, try Russian format
+            if not pool_matches:
+                pool_pattern = r'--- АНАЛИЗ ПУЛА: ([^(]+)\s*\(([^)]+)\) ---(.*?)(?=--- АНАЛИЗ ПУЛА:|ДРУГИЕ ПУЛЫ|ОБЩАЯ СТАТИСТИКА|$)'
+                pool_matches_ru = re.findall(pool_pattern, content, re.DOTALL)
+                for pool_name, pool_id, pool_content in pool_matches_ru:
+                    pool_data = self._parse_pool_section_russian(pool_name.strip(), pool_id.strip(), pool_content)
+                    if pool_data:
+                        data['pools'].append(pool_data)
+            else:
+                # Parse English format pools
+                for i, pool_match in enumerate(pool_matches):
+                    pool_name = pool_match.strip()
+                    # Extract the pool section content
+                    pool_section_pattern = f'POOL {i+1}:\\s*{re.escape(pool_name)}(.*?)(?=POOL \\d+:|SUMMARY:|$)'
+                    pool_content_match = re.search(pool_section_pattern, content, re.DOTALL)
+                    if pool_content_match:
+                        pool_content = pool_content_match.group(1)
+                        pool_data = self._parse_pool_section_english(pool_name, pool_content)
+                        if pool_data:
+                            data['pools'].append(pool_data)
             
             return data
             
@@ -373,6 +401,156 @@ class ReportFormatter:
             return 0.0
         except:
             return 0.0
+
+    def _parse_pool_section_english(self, pool_name: str, content: str) -> Optional[Dict]:
+        """Parse individual pool section in English format"""
+        try:
+            pool_data = {
+                'name': pool_name,
+                'id': '',
+                'tvl': 0.0,
+                'volume_24h': 0.0,
+                'volume_7d': 0.0,
+                'positions_count': 0,
+                'positions_value': 0.0,
+                'pending_yield': 0.0,
+                'daily_volumes': [],
+                'positions': []
+            }
+            
+            # Extract TVL and volumes from English format
+            tvl_match = re.search(r'Pool TVL:\s*\$([0-9,]+\.?\d*)', content)
+            if not tvl_match:
+                tvl_match = re.search(r'TVL:\s*\$([0-9,]+\.?\d*)', content)
+            if tvl_match:
+                pool_data['tvl'] = float(tvl_match.group(1).replace(',', ''))
+            
+            vol_24h_match = re.search(r'24h Volume:\s*\$([0-9,]+\.?\d*)', content)
+            if not vol_24h_match:
+                vol_24h_match = re.search(r'24h Vol:\s*\$([0-9,]+\.?\d*)', content)
+            if vol_24h_match:
+                pool_data['volume_24h'] = float(vol_24h_match.group(1).replace(',', ''))
+            
+            # Extract position count and value from English format
+            pos_count_match = re.search(r'Active positions:\s*(\d+)', content)
+            if not pos_count_match:
+                pos_count_match = re.search(r'Active:\s*(\d+)', content)
+            if pos_count_match:
+                pool_data['positions_count'] = int(pos_count_match.group(1))
+            
+            pos_value_match = re.search(r'Total position value:\s*\$([0-9,]+\.?\d*)', content)
+            if not pos_value_match:
+                pos_value_match = re.search(r'Value:\s*\$([0-9,]+\.?\d*)', content)
+            if pos_value_match:
+                pool_data['positions_value'] = float(pos_value_match.group(1).replace(',', ''))
+            
+            # Extract pending yield from English format
+            yield_match = re.search(r'Pending yield \(fees\):\s*\$([0-9,]+\.?\d*)', content)
+            if not yield_match:
+                yield_match = re.search(r'Yield:\s*\$([0-9,]+\.?\d*)', content)
+            if yield_match:
+                pool_data['pending_yield'] = float(yield_match.group(1).replace(',', ''))
+            
+            # Extract daily volumes
+            daily_pattern = r'(\d{4}-\d{2}-\d{2}):\s*\$([0-9,]+\.?\d*)'
+            daily_matches = re.findall(daily_pattern, content)
+            for date, volume in daily_matches:
+                pool_data['daily_volumes'].append({
+                    'date': date,
+                    'volume': float(volume.replace(',', ''))
+                })
+            
+            # Extract positions details from English format
+            pos_pattern = r'(\d+)\.\s*NFT:\s*([A-Za-z0-9]+).*?Value:\s*\$([0-9,]+\.?\d*).*?Fees:\s*\$([0-9,]+\.?\d*)'
+            pos_matches = re.findall(pos_pattern, content, re.DOTALL)
+            
+            for pos_num, nft_id, value, yield_amount in pos_matches:
+                yield_val = float(yield_amount.replace(',', ''))
+                
+                pool_data['positions'].append({
+                    'number': int(pos_num),
+                    'nft_id': nft_id,
+                    'value': float(value.replace(',', '')),
+                    'yield': yield_val
+                })
+            
+            return pool_data
+            
+        except Exception as e:
+            print(f"Error parsing English pool section: {e}")
+            return None
+
+    def _parse_pool_section_russian(self, pool_name: str, pool_id: str, content: str) -> Optional[Dict]:
+        """Parse individual pool section in Russian format (original method)"""
+        try:
+            pool_data = {
+                'name': pool_name,
+                'id': pool_id,
+                'tvl': 0.0,
+                'volume_24h': 0.0,
+                'volume_7d': 0.0,
+                'positions_count': 0,
+                'positions_value': 0.0,
+                'pending_yield': 0.0,
+                'daily_volumes': [],
+                'positions': []
+            }
+            
+            # Extract TVL
+            tvl_match = re.search(r'Общая ликвидность пула \(TVL\):\s*\$([0-9,]+\.?\d*)', content)
+            if tvl_match:
+                pool_data['tvl'] = float(tvl_match.group(1).replace(',', ''))
+            
+            # Extract volumes
+            vol_24h_match = re.search(r'Объем торгов за 24 часа:\s*\$([0-9,]+\.?\d*)', content)
+            if vol_24h_match:
+                pool_data['volume_24h'] = float(vol_24h_match.group(1).replace(',', ''))
+            
+            vol_7d_match = re.search(r'Объем торгов за 7 дней:\s*\$([0-9,]+\.?\d*)', content)
+            if vol_7d_match:
+                pool_data['volume_7d'] = float(vol_7d_match.group(1).replace(',', ''))
+            
+            # Extract position count and value
+            pos_count_match = re.search(r'Активные позиции:\s*(\d+)', content)
+            if pos_count_match:
+                pool_data['positions_count'] = int(pos_count_match.group(1))
+            
+            pos_value_match = re.search(r'Общая стоимость позиций:\s*~?\$([0-9,]+\.?\d*)', content)
+            if pos_value_match:
+                pool_data['positions_value'] = float(pos_value_match.group(1).replace(',', ''))
+            
+            # Extract daily volumes
+            daily_pattern = r'- (\d{4}-\d{2}-\d{2}):\s*\$([0-9,]+\.?\d*)'
+            daily_matches = re.findall(daily_pattern, content)
+            for date, volume in daily_matches:
+                pool_data['daily_volumes'].append({
+                    'date': date,
+                    'volume': float(volume.replace(',', ''))
+                })
+            
+            # Extract positions details
+            pos_pattern = r'(\d+)\.\s*NFT:\s*([A-Za-z0-9]+)\s*\n\s*Стоимость:\s*\$([0-9,]+\.?\d*)\s*\n.*?Общий Pending Yield:\s*~?\$([0-9,]+\.?\d*)'
+            pos_matches = re.findall(pos_pattern, content, re.DOTALL)
+            
+            total_yield = 0.0
+            for pos_num, nft_id, value, yield_amount in pos_matches:
+                yield_val = float(yield_amount.replace(',', ''))
+                total_yield += yield_val
+                
+                pool_data['positions'].append({
+                    'number': int(pos_num),
+                    'nft_id': nft_id,
+                    'value': float(value.replace(',', '')),
+                    'yield': yield_val
+                })
+            
+            pool_data['pending_yield'] = total_yield
+            
+            return pool_data
+            
+        except Exception as e:
+            print(f"Error parsing Russian pool section: {e}")
+            return None
 
 # Utility functions for quick formatting
 def format_number(value: float, precision: int = 2) -> str:
