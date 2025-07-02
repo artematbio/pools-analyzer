@@ -32,11 +32,10 @@ TARGET_POOL_ID_1 = "DojNuRx9Ncky7BbWRfsLmJg2oYb8qsYD344XufUHAjbJ"  # BIO/CURES
 TARGET_POOL_ID_2 = "4LuGwek6Jv4xpGvsQwZXonmLuRhrpHtmKVs95bN9EkTm"  # SOL/BIO
 TARGET_POOL_ID_3 = "DCNWwwSHSLYRR9WbBunkRaPEC73ba68yQNhytap3qRJZ"  # BIO/QBIO
 TARGET_POOL_ID_4 = "3K2NaZx1KAyJqsdUkUu9qgtk1qJEs6wbygjLxJvvXrLhq" # BIO/GROW
-TARGET_POOL_ID_5 = "" # Запасной ID пула 5 (не используется согласно списку пользователя)
-TARGET_POOL_ID_6 = "FgCQoL7tcC1nkNazV5onEgWbm9UJ9nbzqo9rZCYm6Yi4" # SOL/MYCO
-TARGET_POOL_ID_7 = "HhtxoFCY7uxQKBP1AHVXhCQ3jYtRWL3n1CwBKcfoun5Q" # BIO/MYCO
-TARGET_POOL_ID_8 = "CkDV9Eko3KijeRpadFyJTSi4fiBbCT9d3Vdp9JhsUioM" # SOL/SPINE
-TARGET_POOL_ID_9 = "5LZawn1Pqv8Jd96nq5GPVZAz9a7jZWFD66A5JvUodRNL" # BIO/SPINE
+TARGET_POOL_ID_5 = "CkDV9Eko3KijeRpadFyJTSi4fiBbCT9d3Vdp9JhsUioM" # SOL/SPINE
+TARGET_POOL_ID_6 = "5LZawn1Pqv8Jd96nq5GPVZAz9a7jZWFD66A5JvUodRNL" # BIO/SPINE
+TARGET_POOL_ID_7 = "HMWSMe7PVmwmiRccbTW14BkKj54x3XESgBgqAshTutaA" # BIO/RIF
+TARGET_POOL_ID_8 = "FErC1cX1tH2mGRpzfXpeAiNMe6Zu2zpQSeqteDAm9W49" # BIO/URO
 
 # Собираем их в список для итерации, отфильтровывая пустые или None значения
 PRIMARY_TARGET_POOL_IDS = [
@@ -45,11 +44,10 @@ PRIMARY_TARGET_POOL_IDS = [
         TARGET_POOL_ID_2, 
         TARGET_POOL_ID_3, 
         TARGET_POOL_ID_4, 
-        TARGET_POOL_ID_5, # Добавил ID_5, чтобы список был полным, но он отфильтруется, т.к. пустой
+        TARGET_POOL_ID_5, 
         TARGET_POOL_ID_6, 
-        TARGET_POOL_ID_7, 
-        TARGET_POOL_ID_8,
-        TARGET_POOL_ID_9
+        TARGET_POOL_ID_7,
+        TARGET_POOL_ID_8
     ] if pid and pid.strip()
 ]
 
@@ -58,9 +56,13 @@ HELIUS_API_KEY = "d4af7b72-f199-4d77-91a9-11d8512c5e42"
 HELIUS_RPC_URL = "https://mainnet.helius-rpc.com/?api-key=d4af7b72-f199-4d77-91a9-11d8512c5e42"
 COINGECKO_ENDPOINT = "https://pro-api.coingecko.com/api/v3/"
 COINGECKO_API_KEY = "CG-9MrJcucBMMx5HKnXeVBD8oSb"
-BITQUERY_API_KEY = "ory_at_w20OBh_CPS-k6ODVkbnRecl1GAYuOlk363VxvJCvr5A.6NAktl8DPylp3oOoYxl4arEF9mnWRgq_0v9j2_WdPPs"
+BITQUERY_API_KEY = "ory_at_OI5h53-hz23D-ugNFUQobJPWBt_Ut7EA3AzPdi1de3o.3x2G8ub_P5HUYzJmnturgcfhc4Mz4C-yJ8GLDhDAeHQ"
 BITQUERY_ENDPOINT = "https://streaming.bitquery.io/eap"
-TARGET_WALLET_ADDRESS = "BpvSz1bQ7qHb7qAD748TREgSPBp6i6kukukNVgX49uxD"
+TARGET_WALLET_ADDRESSES = [
+    "BpvSz1bQ7qHb7qAD748TREgSPBp6i6kukukNVgX49uxD",  # Первый кошелек
+    "EKuXYJ1Shg38u67vT91YbucttoG1RKCneXF1aEhXq8K6"   # Второй кошелек
+]
+TARGET_WALLET_ADDRESS = TARGET_WALLET_ADDRESSES[0]  # Оставляем для обратной совместимости
 TARGET_POOL_ID = TARGET_POOL_ID_1  # Оставляем для обратной совместимости
 RAYDIUM_API_V3_BASE_URL = "https://api-v3.raydium.io"
 # ID программы Raydium CLMM
@@ -198,8 +200,9 @@ TOKEN_SYMBOL_MAP = {
     "pLtMXLNscxZ8CL3Nj6fLzDQbiuL9qkL8tShnt9tWzXo": "PNDR",
     "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ": "BIO",
     "9qU3LmwKJKT2DJeGPihyTP2jc6pC7ij3hPFeyJVzuksN": "CURES",
+    "GJtJuWD9qYcCkrwMBmtY1tpapV1sKfB2zUv9Q4aqpump": "RIF",
+    "FvgqHMfL9yn39V79huDPy3YUNDoYJpuLWng2JfmQpump": "URO",
     "qbioCGDnUBGX5qcK1Fc4zg19GaQEPmxHFMPMZQm4LZ8": "QBIO",
-    "EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3": "MYCO",
     "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR": "SPINE"
 }
 
@@ -208,12 +211,14 @@ TOKEN_COINGECKO_IDS = {
     "So11111111111111111111111111111111111111112": "solana",    # SOL
     "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ": "bio-protocol", # BIO
     "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR": "spine", # SPINE
-    "EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3": "mycelium-protocol", # MYCO
+    "GJtJuWD9qYcCkrwMBmtY1tpapV1sKfB2zUv9Q4aqpump": "rifampicin", # RIF
+    "FvgqHMfL9yn39V79huDPy3YUNDoYJpuLWng2JfmQpump": "urolithin-a", # URO
 }
 
 # Определяем константы из TOKEN_SYMBOL_MAP
 BIO_ADDRESS = "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ"
-MYCO_ADDRESS = "EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3"
+RIF_ADDRESS = "GJtJuWD9qYcCkrwMBmtY1tpapV1sKfB2zUv9Q4aqpump"
+URO_ADDRESS = "FvgqHMfL9yn39V79huDPy3YUNDoYJpuLWng2JfmQpump"
 SPINE_ADDRESS = "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR"
 
 # Математические хелперы
@@ -899,18 +904,7 @@ async def analyze_single_position(position_nft_mint: str, position_pda: str, tar
         amount0_adjusted = amounts["amount0_raw"] / Decimal(10 ** decimals0)
         amount1_adjusted = amounts["amount1_raw"] / Decimal(10 ** decimals1)
         
-        # Если это позиция BIO/MYCO, печатаем подробную информацию для отладки
-        if (token_mint0_from_pool_state == BIO_ADDRESS or token_mint1_from_pool_state == BIO_ADDRESS) and \
-           (token_mint0_from_pool_state == MYCO_ADDRESS or token_mint1_from_pool_state == MYCO_ADDRESS):
-            print(f"[CRITICAL_DEBUG] 🔍 BIO/MYCO Position Analysis for {position_pda}:")
-            print(f"[CRITICAL_DEBUG] liquidity: {liquidity}")
-            print(f"[CRITICAL_DEBUG] sqrt_price_x64_current: {sqrt_price_x64_current}")
-            print(f"[CRITICAL_DEBUG] tick_lower: {tick_lower}, tick_upper: {tick_upper}, tick_current: {tick_current}")
-            print(f"[CRITICAL_DEBUG] amounts['amount0_raw']: {amounts['amount0_raw']}")
-            print(f"[CRITICAL_DEBUG] amounts['amount1_raw']: {amounts['amount1_raw']}")
-            print(f"[CRITICAL_DEBUG] decimals0: {decimals0}, decimals1: {decimals1}")
-            print(f"[CRITICAL_DEBUG] amount0_adjusted: {amount0_adjusted}")
-            print(f"[CRITICAL_DEBUG] amount1_adjusted: {amount1_adjusted}")
+# Debug logging removed for MYCO (token no longer monitored)
         
         # Суммы полученных комиссий
         fees_owed_a_adjusted = Decimal(fees_owed_a) / Decimal(10 ** decimals0)
@@ -945,31 +939,7 @@ async def analyze_single_position(position_nft_mint: str, position_pda: str, tar
         print(f"  Fees1: {fees_owed_b_adjusted} × ${actual_token1_price} = ${fees1_value_usd}")
         print(f"  Total Position Value: ${position_usd_value}")
         
-        # Еще более подробное логирование для BIO/MYCO
-        if (token_mint0_from_pool_state == BIO_ADDRESS or token_mint1_from_pool_state == BIO_ADDRESS) and \
-           (token_mint0_from_pool_state == MYCO_ADDRESS or token_mint1_from_pool_state == MYCO_ADDRESS):
-            print(f"[CRITICAL_RESULT] 🚨 BIO/MYCO Position Value Breakdown for {position_pda}:")
-            
-            # Определяем, какой токен какой
-            if token_mint0_from_pool_state == BIO_ADDRESS:
-                bio_amount = amount0_adjusted
-                bio_price = actual_token0_price
-                bio_value = token0_value_usd
-                myco_amount = amount1_adjusted
-                myco_price = actual_token1_price
-                myco_value = token1_value_usd
-            else:
-                bio_amount = amount1_adjusted
-                bio_price = actual_token1_price
-                bio_value = token1_value_usd
-                myco_amount = amount0_adjusted
-                myco_price = actual_token0_price
-                myco_value = token0_value_usd
-                
-            print(f"[CRITICAL_RESULT] BIO: {bio_amount} × ${bio_price} = ${bio_value}")
-            print(f"[CRITICAL_RESULT] MYCO: {myco_amount} × ${myco_price} = ${myco_value}")
-            print(f"[CRITICAL_RESULT] Total BIO+MYCO: ${bio_value + myco_value}")
-            print(f"[CRITICAL_RESULT] With Fees: ${position_usd_value}")
+# Detailed MYCO logging removed (token no longer monitored)
         
         # Формируем результирующий объект с данными позиции
         position_analysis = {
@@ -1885,42 +1855,78 @@ async def duplicate_pool_data_to_supabase(pool_data: Dict[str, Any]) -> bool:
         return False
 
 # Основная функция
+async def get_positions_from_multiple_wallets(wallet_addresses: List[str], helius_rpc_url: str, helius_api_key: str) -> List[Dict[str, Any]]:
+    """
+    Получает CLMM позиции из нескольких кошельков и объединяет их в один список.
+    
+    Args:
+        wallet_addresses: Список адресов кошельков для мониторинга
+        helius_rpc_url: URL Helius RPC API
+        helius_api_key: API ключ Helius
+        
+    Returns:
+        Объединенный список всех позиций из всех кошельков
+    """
+    all_positions = []
+    
+    for wallet_address in wallet_addresses:
+        print(f"[INFO] Fetching CLMM positions for wallet: {wallet_address}")
+        try:
+            wallet_positions = await get_clmm_positions(
+                wallet_address, 
+                helius_rpc_url, 
+                helius_api_key
+            )
+            
+            if wallet_positions:
+                # Добавляем информацию о кошельке к каждой позиции
+                for position in wallet_positions:
+                    position['wallet_address'] = wallet_address
+                
+                all_positions.extend(wallet_positions)
+                print(f"[INFO] Found {len(wallet_positions)} positions in wallet {wallet_address}")
+            else:
+                print(f"[INFO] No positions found in wallet {wallet_address}")
+                
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch positions for wallet {wallet_address}: {e}")
+            continue
+    
+    return all_positions
+
 async def main():
     """
-    Основная функция для анализа пула и позиций кошелька с использованием
+    Основная функция для анализа пула и позиций нескольких кошельков с использованием
     функции get_clmm_positions из positions.py как единственного источника
     данных о позициях. Поддерживает анализ нескольких основных пулов.
     """
     start_time = datetime.now()
     
     print(f"{'=' * 50}")
-    print(f"Raydium CLMM Pool Analyzer (Расширенная версия)")
+    print(f"Raydium CLMM Pool Analyzer (Расширенная версия с множественными кошельками)")
     print(f"{'=' * 50}")
     print(f"Analysis started at: {start_time.isoformat()}")
     print(f"Configuration:")
-    print(f"  Target wallet: {TARGET_WALLET_ADDRESS}")
+    print(f"  Target wallets: {TARGET_WALLET_ADDRESSES}")
     print(f"  Primary target pools for detailed analysis: {PRIMARY_TARGET_POOL_IDS}")
     print(f"  Helius RPC URL: {HELIUS_RPC_URL[:30]}...")
     print(f"{'=' * 50}")
     
-    
-    print(f"Target wallet: {TARGET_WALLET_ADDRESS}")
-    
     # Создаем общий httpx клиент для всех запросов
     async with httpx.AsyncClient(timeout=60.0) as client:
-        # Шаг 1: Получаем все активные CLMM позиции кошелька через positions.py
-        print("[INFO] Fetching all CLMM positions via positions.py...")
-        all_wallet_positions = await get_clmm_positions(
-            TARGET_WALLET_ADDRESS, 
+        # Шаг 1: Получаем все активные CLMM позиции из всех кошельков через positions.py
+        print("[INFO] Fetching all CLMM positions from multiple wallets via positions.py...")
+        all_wallet_positions = await get_positions_from_multiple_wallets(
+            TARGET_WALLET_ADDRESSES, 
             HELIUS_RPC_URL, 
             HELIUS_API_KEY
         )
         
         if not all_wallet_positions:
-            print(f"[ERROR] No active Raydium CLMM positions found for wallet {TARGET_WALLET_ADDRESS}")
+            print(f"[ERROR] No active Raydium CLMM positions found across all monitored wallets: {TARGET_WALLET_ADDRESSES}")
             return
         
-        print(f"[INFO] Found {len(all_wallet_positions)} active CLMM positions for wallet {TARGET_WALLET_ADDRESS}")
+        print(f"[INFO] Found {len(all_wallet_positions)} active CLMM positions across {len(TARGET_WALLET_ADDRESSES)} monitored wallets")
         
         # Шаг 1.5: Создаем "мастер-словарь" цен всех токенов
         print("[INFO] Creating master token price dictionary for all positions...")
@@ -1960,8 +1966,8 @@ async def main():
             
             print(f"[INFO] GeckoTerminal fetch complete. Processed prices for all {len(all_token_addresses)} unique tokens.")
 
-            # Дополнительная проверка цен для важных токенов (BIO, MYCO, SPINE)
-            critical_tokens = [BIO_ADDRESS, MYCO_ADDRESS, SPINE_ADDRESS]
+            # Дополнительная проверка цен для важных токенов (BIO, RIF, URO, SPINE)
+            critical_tokens = [BIO_ADDRESS, RIF_ADDRESS, URO_ADDRESS, SPINE_ADDRESS]
             for token in critical_tokens:
                 if token in master_token_prices:
                     price = master_token_prices[token]
@@ -2309,13 +2315,16 @@ async def save_report_to_file(pools_data: List[Dict[str, Any]], token_prices: Di
     Сохраняет отчет о пулах в текстовый файл для использования Telegram ботом
     """
     try:
+        # Сортируем пулы по общей стоимости позиций от большего к меньшему
+        pools_data_sorted = sorted(pools_data, key=lambda pool: float(pool.get('total_usd_value', 0)), reverse=True)
+        
         # Генерируем имя файла с timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"raydium_pool_report_{timestamp}.txt"
         
         # Подготавливаем данные для отчета
-        total_positions = sum(len(pool.get('positions', [])) for pool in pools_data)
-        total_value = sum(float(pool.get('total_usd_value', 0)) for pool in pools_data)
+        total_positions = sum(len(pool.get('positions', [])) for pool in pools_data_sorted)
+        total_value = sum(float(pool.get('total_usd_value', 0)) for pool in pools_data_sorted)
         
         # Создаем отчет
         report_lines = []
@@ -2327,14 +2336,14 @@ async def save_report_to_file(pools_data: List[Dict[str, Any]], token_prices: Di
         report_lines.append("")
         report_lines.append(f"Generated: {end_time.strftime('%Y-%m-%d %H:%M:%S UTC')}")
         report_lines.append(f"Execution time: {end_time - start_time}")
-        report_lines.append(f"Wallet: {TARGET_WALLET_ADDRESS}")
-        report_lines.append(f"Total Pools Analyzed: {len(pools_data)}")
+        report_lines.append(f"Wallets: {', '.join(TARGET_WALLET_ADDRESSES)}")
+        report_lines.append(f"Total Pools Analyzed: {len(pools_data_sorted)}")
         report_lines.append(f"Total Positions: {total_positions}")
         report_lines.append(f"Общая стоимость всех позиций: ${total_value:,.2f}")
         report_lines.append("")
         
-        # Детали по каждому пулу
-        for i, pool in enumerate(pools_data, 1):
+        # Детали по каждому пулу (отсортированы по стоимости позиций)
+        for i, pool in enumerate(pools_data_sorted, 1):
             pool_name = pool.get('name', 'Unknown Pool')
             pool_tvl = float(pool.get('pool_tvl_usd', 0))
             pool_volume_24h = float(pool.get('pool_24h_volume_usd', 0))
@@ -2401,7 +2410,7 @@ async def save_report_to_file(pools_data: List[Dict[str, Any]], token_prices: Di
         
         total_fees_all = sum(
             sum(float(pos.get('fees_usd', 0)) for pos in pool.get('positions', []))
-            for pool in pools_data
+            for pool in pools_data_sorted
         )
         report_lines.append(f"Total pending yield: ${total_fees_all:,.2f}")
         
