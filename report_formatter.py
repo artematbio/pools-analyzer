@@ -431,8 +431,18 @@ Change: {change_sign}${change_amount:,.2f} ({change_percent:+.1f}%)
         
         for pos in out_of_range_positions:
             pool_name = pos.get('pool_name', 'Unknown Pool')
-            position_value = pos.get('position_value_usd', 0)
-            fees_usd = pos.get('fees_usd', 0)
+            
+            # Safe conversion to float for formatting
+            try:
+                position_value = float(pos.get('position_value_usd', 0))
+            except (ValueError, TypeError):
+                position_value = 0.0
+            
+            try:
+                fees_usd = float(pos.get('fees_usd', 0))
+            except (ValueError, TypeError):
+                fees_usd = 0.0
+            
             position_mint = pos.get('position_mint', 'N/A')[:8] + "..."
             
             alert_text += f"📍 <b>{pool_name}</b>\n"
