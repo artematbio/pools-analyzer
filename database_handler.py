@@ -222,7 +222,27 @@ class SupabaseHandler:
             if not self.is_connected():
                 return None
                 
+            # Рассчитываем TVL изменение если есть исторические данные
+            tvl_change_percent = None
+            tvl_change_usd = None
+            
+            if 'pool_id' in pool_data:
+                historical_data = self.get_historical_pool_tvl(pool_data['pool_id'], days_back=1)
+                if historical_data and 'tvl_usd' in historical_data:
+                    current_tvl = float(pool_data.get('tvl_usd', 0))
+                    historical_tvl = float(historical_data.get('tvl_usd', 0))
+                    
+                    if historical_tvl > 0:
+                        tvl_change_percent = ((current_tvl - historical_tvl) / historical_tvl) * 100
+                        tvl_change_usd = current_tvl - historical_tvl
+            
+            # Подготавливаем данные для сохранения
             converted_data = self._convert_data(pool_data)
+            
+            # Добавляем рассчитанные данные TVL изменений
+            if tvl_change_percent is not None:
+                converted_data['tvl_change_percent'] = tvl_change_percent
+                converted_data['tvl_change_usd'] = tvl_change_usd
             
             result = self.client.table('lp_pool_snapshots').insert(converted_data).execute()
             
@@ -387,6 +407,51 @@ class SupabaseHandler:
         except Exception as e:
             logging.error(f"❌ Ошибка получения статистики БД: {e}")
             return {}
+
+    def get_historical_pool_tvl(self, pool_id: str, days_back: int = 1) -> Optional[Dict[str, Any]]:
+        """Получить исторические данные TVL пула из lp_pool_snapshots"""
+        try:
+            if not self.is_connected():
+                return None
+                
+            # Вычисляем дату days_back дней назад
+            from datetime import datetime, timedelta
+            target_date = datetime.now() - timedelta(days=days_back)
+            target_date_str = target_date.strftime('%Y-%m-%d')
+            
+            # Ищем снимки пула за указанную дату
+            result = self.client.table('lp_pool_snapshots').select('*').eq(
+                'pool_id', pool_id
+            ).gte('created_at', target_date_str).lt(
+                'created_at', (target_date + timedelta(days=1)).strftime('%Y-%m-%d')
+            ).order('created_at', desc=True).limit(1).execute()
+            
+            if result.data and len(result.data) > 0:
+                return result.data[0]
+            else:
+                # Если не найдено за конкретную дату, ищем ближайшую запись
+                result = self.client.table('lp_pool_snapshots').select('*').eq(
+                    'pool_id', pool_id
+                ).lt('created_at', target_date_str).order('created_at', desc=True).limit(1).execute()
+                
+                return result.data[0] if result.data and len(result.data) > 0 else None
+                
+        except Exception as e:
+            logging.error(f"❌ Ошибка получения исторических данных TVL: {e}")
+            return None
+
+    def calculate_tvl_change(self, current_tvl: float, historical_tvl: float) -> Optional[float]:
+        """Рассчитать изменение TVL в процентах"""
+        try:
+            if historical_tvl == 0:
+                return None
+                
+            change_percent = ((current_tvl - historical_tvl) / historical_tvl) * 100
+            return round(change_percent, 2)
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка расчета изменения TVL: {e}")
+            return None
 
 # Глобальный экземпляр для использования в других модулях
 supabase_handler = SupabaseHandler() if Client else None 

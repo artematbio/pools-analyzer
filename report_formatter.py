@@ -65,7 +65,9 @@ class ReportFormatter:
                 data['total_positions'] = int(total_pos_match.group(1))
             
             # Extract total value - try both English and Russian formats
-            total_val_match = re.search(r'Total Value:\s*\$([0-9,]+\.?\d*)', content)
+            total_val_match = re.search(r'Total Portfolio Value:\s*\$([0-9,]+\.?\d*)', content)
+            if not total_val_match:
+                total_val_match = re.search(r'Total Value:\s*\$([0-9,]+\.?\d*)', content)
             if not total_val_match:
                 total_val_match = re.search(r'Общая стоимость всех позиций:\s*\$([0-9,]+\.?\d*)', content)
             if total_val_match:
@@ -205,9 +207,24 @@ class ReportFormatter:
         for i, pool in enumerate(data['pools'], 1):
             report.append(f"POOL {i}: {pool['name']}")
             
+            # Цены токенов
+            if pool.get('token_prices'):
+                report.append("TOKEN PRICES:")
+                for token_symbol, token_price in pool['token_prices'].items():
+                    report.append(f"  {token_symbol}: ${token_price:,.6f}")
+                report.append("")
+            
             # Basic metrics - сокращаем название
             report.append("TVL & VOLUMES:")
             report.append(f"  TVL: ${pool['tvl']:,.2f}")
+            
+            # TVL изменение
+            if pool.get('tvl_change_percent') is not None:
+                change_symbol = "+" if pool['tvl_change_percent'] > 0 else ""
+                report.append(f"  TVL change %: {change_symbol}{pool['tvl_change_percent']:.2f}%")
+            else:
+                report.append(f"  TVL change %: N/A")
+            
             report.append(f"  24h Vol: ${pool['volume_24h']:,.2f}")
             
             # Daily volumes (last 7 days) - сокращаем заголовок
@@ -372,34 +389,71 @@ class ReportFormatter:
             return f"Error formatting status: {str(e)}"
     
     def format_error_alert(self, error_type: str, error_message: str, context: str = "") -> str:
-        """Format error alert message"""
-        lines = []
-        lines.append("ERROR ALERT")
-        lines.append("=" * 15)
-        lines.append("")
+        """Format error alert for Telegram"""
+        alert_text = f"""
+❌ <b>ERROR: {error_type}</b>
+
+{error_message}
+
+<i>Context: {context}</i>
+<i>Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</i>
+"""
+        return alert_text.strip()
+
+    def format_portfolio_change_alert(self, previous_value: float, current_value: float, change_percent: float) -> str:
+        """Format portfolio change alert for Telegram"""
+        change_amount = current_value - previous_value
+        change_symbol = "📈" if change_amount > 0 else "📉"
+        change_sign = "+" if change_amount > 0 else ""
         
-        current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
-        lines.append(f"Timestamp: {current_time}")
-        lines.append(f"Error Type: {error_type}")
-        lines.append("")
-        lines.append("Message:")
-        lines.append(error_message)
+        alert_text = f"""
+{change_symbol} <b>PORTFOLIO VALUE CHANGE</b>
+
+Previous: ${previous_value:,.2f}
+Current: ${current_value:,.2f}
+Change: {change_sign}${change_amount:,.2f} ({change_percent:+.1f}%)
+
+<i>Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</i>
+"""
+        return alert_text.strip()
+
+    def format_out_of_range_alert(self, out_of_range_positions: list) -> str:
+        """Format out of range positions alert for Telegram"""
+        if not out_of_range_positions:
+            return ""
         
-        if context:
-            lines.append("")
-            lines.append("Context:")
-            lines.append(context)
+        alert_text = f"""
+⚠️ <b>OUT OF RANGE POSITIONS ALERT</b>
+
+{len(out_of_range_positions)} position(s) are currently out of range:
+
+"""
         
-        return '\n'.join(lines)
+        for pos in out_of_range_positions:
+            pool_name = pos.get('pool_name', 'Unknown Pool')
+            position_value = pos.get('position_value_usd', 0)
+            fees_usd = pos.get('fees_usd', 0)
+            position_mint = pos.get('position_mint', 'N/A')[:8] + "..."
+            
+            alert_text += f"📍 <b>{pool_name}</b>\n"
+            alert_text += f"   NFT: {position_mint}\n"
+            alert_text += f"   Value: ${position_value:,.2f}\n"
+            alert_text += f"   Fees: ${fees_usd:,.2f}\n\n"
+        
+        alert_text += f"<i>Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
+        
+        return alert_text.strip()
     
     def _extract_total_value(self, report_content: str) -> float:
         """Extract total portfolio value from report"""
         try:
-            match = re.search(r'Общая стоимость всех позиций:\s*\$([0-9,]+\.?\d*)', report_content)
+            match = re.search(r'Total Portfolio Value:\s*\$([0-9,]+\.?\d*)', report_content)
+            if not match:
+                match = re.search(r'Общая стоимость всех позиций:\s*\$([0-9,]+\.?\d*)', report_content)
             if match:
                 return float(match.group(1).replace(',', ''))
             return 0.0
-        except:
+        except Exception:
             return 0.0
 
     def _parse_pool_section_english(self, pool_name: str, content: str) -> Optional[Dict]:

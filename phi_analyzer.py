@@ -97,7 +97,9 @@ def extract_detailed_pool_data(content: str, date_str: str, time_str: str) -> Di
     
     # Extract total portfolio stats
     pos_match = re.search(r'Всего CLMM позиций:\s*(\d+)', content)
-    value_match = re.search(r'Общая стоимость всех позиций:\s*\$([0-9,]+\.?\d*)', content)
+    value_match = re.search(r'Total Portfolio Value:\s*\$([0-9,]+\.?\d*)', content)
+    if not value_match:
+        value_match = re.search(r'Общая стоимость всех позиций:\s*\$([0-9,]+\.?\d*)', content)
     
     if pos_match:
         data["total_positions"] = int(pos_match.group(1))

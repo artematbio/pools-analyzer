@@ -124,6 +124,14 @@ class RaydiumScheduler:
             description="System health monitoring"
         )
         
+        # Out of range positions check - every 30 minutes
+        self.tasks['out_of_range_check'] = ScheduledTask(
+            name="Out of Range Positions Check",
+            cron_expression="*/30 * * * *",  # Every 30 minutes
+            function=self.check_out_of_range_positions,
+            description="Check for out of range positions and send alerts"
+        )
+        
         # Daily alert summary - if needed
         self.tasks['daily_alert_summary'] = ScheduledTask(
             name="Daily Alert Summary",
@@ -606,6 +614,27 @@ class RaydiumScheduler:
         except Exception as e:
             logging.error(f"Health check failed: {e}")
             self.system_health['status'] = 'error'
+    
+    async def check_out_of_range_positions(self):
+        """Check for out of range positions and send alerts"""
+        try:
+            logging.info("🔍 Checking out of range positions...")
+            
+            # Use the alerting system to check positions
+            alert_sent = await alerting_system.check_out_of_range_positions()
+            
+            if alert_sent:
+                logging.info("✅ Out of range positions alert sent")
+            else:
+                logging.debug("✅ No out of range positions or alert rate limited")
+                
+        except Exception as e:
+            logging.error(f"❌ Out of range positions check failed: {e}")
+            await alerting_system.send_error_alert(
+                "Out of Range Check",
+                f"Failed to check out of range positions: {str(e)}",
+                "Scheduled task execution"
+            )
     
     async def send_daily_summary(self):
         """Send daily alert summary if needed"""

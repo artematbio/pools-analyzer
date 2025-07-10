@@ -1795,6 +1795,7 @@ async def duplicate_pool_data_to_supabase(pool_data: Dict[str, Any]) -> bool:
             'in_range_positions': pool_data.get('in_range_positions', 0),
             'out_of_range_positions': pool_data.get('out_of_range_positions', 0),
             'total_value_usd': float(pool_data.get('total_usd_value', 0)),
+
             'timestamp': datetime.now().isoformat()
         }
         
@@ -1807,16 +1808,22 @@ async def duplicate_pool_data_to_supabase(pool_data: Dict[str, Any]) -> bool:
         for position in positions:
             position_snapshot_data = {
                 'pool_id': pool_data.get('id'),
+                'pool_name': pool_name,
                 'position_mint': position.get('position_mint'),
-                'position_pda': position.get('position_pda'),
-                'liquidity': str(position.get('liquidity', 0)),
                 'tick_lower': position.get('tick_lower'),
                 'tick_upper': position.get('tick_upper'),
+                'token0_address': position.get('token0'),
+                'token0_symbol': pool_data.get('mintA', {}).get('symbol', 'Unknown'),
                 'token0_amount': float(position.get('token0_amount', 0)),
+                'token1_address': position.get('token1'),
+                'token1_symbol': pool_data.get('mintB', {}).get('symbol', 'Unknown'),
                 'token1_amount': float(position.get('token1_amount', 0)),
                 'position_value_usd': float(position.get('position_value_usd', 0)),
                 'fees_usd': float(position.get('fees_usd', 0)),
                 'in_range': position.get('in_range', False),
+                'current_price': float(pool_data.get('price', 0)),
+                'fee_tier': float(position.get('fee_tier', 0)),
+                'liquidity_share_percent': 0,  # Можно рассчитать при необходимости
                 'timestamp': datetime.now().isoformat()
             }
             
@@ -2247,6 +2254,23 @@ async def main():
                     else:
                         print(f"[WARN] Missing required keys in position_data: {position_data.keys()}")
                 
+                # Получаем изменение TVL из базы данных
+                tvl_change_percent = None
+                tvl_change_usd = None
+                
+                if SUPABASE_ENABLED and supabase_handler and supabase_handler.is_connected():
+                    try:
+                        historical_data = supabase_handler.get_historical_pool_tvl(current_pool_id_from_list, days_back=1)
+                        if historical_data and 'tvl_usd' in historical_data:
+                            historical_tvl = float(historical_data.get('tvl_usd', 0))
+                            current_tvl = float(pool_tvl_usd)
+                            
+                            if historical_tvl > 0:
+                                tvl_change_percent = ((current_tvl - historical_tvl) / historical_tvl) * 100
+                                tvl_change_usd = current_tvl - historical_tvl
+                    except Exception as e:
+                        print(f"[WARN] Не удалось получить исторические данные TVL для {current_pool_id_from_list}: {e}")
+                
                 # Формируем данные пула для отчета
                 pool_specific_data = {
                     "id": current_pool_id_from_list,
@@ -2273,6 +2297,8 @@ async def main():
                     "pool_tvl_usd": str(pool_tvl_usd),
                     "pool_24h_volume_usd": str(pool_24h_volume_usd),
                     "pool_7d_daily_volumes": daily_volumes_7d if daily_volumes_7d else [],
+                    "tvl_change_percent": tvl_change_percent,
+                    "tvl_change_usd": tvl_change_usd,
                     "token0_candles_7d_minute": token0_candles_7d if token0_candles_7d else [],
                     "token1_candles_7d_minute": token1_candles_7d if token1_candles_7d else [],
                     # Добавляем исторические данные о торгах
@@ -2339,7 +2365,7 @@ async def save_report_to_file(pools_data: List[Dict[str, Any]], token_prices: Di
         report_lines.append(f"Wallets: {', '.join(TARGET_WALLET_ADDRESSES)}")
         report_lines.append(f"Total Pools Analyzed: {len(pools_data_sorted)}")
         report_lines.append(f"Total Positions: {total_positions}")
-        report_lines.append(f"Общая стоимость всех позиций: ${total_value:,.2f}")
+        report_lines.append(f"Total Portfolio Value: ${total_value:,.2f}")
         report_lines.append("")
         
         # Детали по каждому пулу (отсортированы по стоимости позиций)
@@ -2349,14 +2375,35 @@ async def save_report_to_file(pools_data: List[Dict[str, Any]], token_prices: Di
             pool_volume_24h = float(pool.get('pool_24h_volume_usd', 0))
             pool_positions = pool.get('positions', [])
             pool_value = float(pool.get('total_usd_value', 0))
+            pool_id = pool.get('id', '')
             
             report_lines.append(f"POOL {i}: {pool_name}")
             report_lines.append("-" * 40)
             report_lines.append("")
             
-            # TVL и объемы
+            # Цены токенов
+            mint_a = pool.get('mintA', {})
+            mint_b = pool.get('mintB', {})
+            price_a = float(mint_a.get('price', 0)) if mint_a.get('price') else 0
+            price_b = float(mint_b.get('price', 0)) if mint_b.get('price') else 0
+            
+            report_lines.append("TOKEN PRICES:")
+            report_lines.append(f"  {mint_a.get('symbol', 'N/A')}: ${price_a:,.6f}")
+            report_lines.append(f"  {mint_b.get('symbol', 'N/A')}: ${price_b:,.6f}")
+            report_lines.append("")
+            
+            # TVL и объемы с изменением
             report_lines.append("TVL & VOLUMES:")
             report_lines.append(f"  Pool TVL: ${pool_tvl:,.2f}")
+            
+            # Используем уже рассчитанные данные изменения TVL
+            tvl_change_percent = pool.get('tvl_change_percent')
+            if tvl_change_percent is not None:
+                change_symbol = "+" if tvl_change_percent > 0 else ""
+                report_lines.append(f"  24h TVL change %: {change_symbol}{tvl_change_percent:.2f}%")
+            else:
+                report_lines.append(f"  24h TVL change %: N/A")
+            
             report_lines.append(f"  24h Volume: ${pool_volume_24h:,.2f}")
             
             # Дневные объемы за 7 дней

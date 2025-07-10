@@ -68,6 +68,7 @@ class AlertingSystem:
         self.rate_limits = {
             'error_cooldown': timedelta(minutes=15),  # Don't spam same error
             'portfolio_cooldown': timedelta(hours=1),  # Portfolio change alerts
+            'position_cooldown': timedelta(minutes=30),  # Out of range position alerts
             'health_check_interval': timedelta(minutes=5)
         }
         
@@ -203,6 +204,78 @@ class AlertingSystem:
         except Exception as e:
             logging.error(f"Error checking portfolio changes: {e}")
             await self.send_error_alert("Portfolio Monitoring", str(e), level=AlertLevel.WARNING)
+            return False
+    
+    async def check_out_of_range_positions(self) -> bool:
+        """
+        Check for out of range positions and send alerts
+        
+        Returns:
+            bool: True if alert was sent
+        """
+        try:
+            # Import here to avoid circular import
+            from pool_analyzer import TARGET_WALLET_ADDRESSES, get_positions_from_multiple_wallets
+            import httpx
+            import os
+            
+            # Get current positions
+            helius_rpc_url = os.getenv('HELIUS_RPC_URL')
+            helius_api_key = os.getenv('HELIUS_API_KEY')
+            
+            if not helius_rpc_url or not helius_api_key:
+                logging.warning("Helius credentials not configured for position checks")
+                return False
+            
+            # Get all positions from all wallets
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                all_positions = await get_positions_from_multiple_wallets(
+                    TARGET_WALLET_ADDRESSES, 
+                    helius_rpc_url, 
+                    helius_api_key
+                )
+            
+            # Filter out of range positions
+            out_of_range_positions = []
+            for pos in all_positions:
+                if pos.get('in_range') is False:
+                    out_of_range_positions.append(pos)
+            
+            # Check if we need to send alert
+            if len(out_of_range_positions) > 0:
+                # Check rate limiting
+                if self._is_rate_limited('out_of_range_positions', 'position_cooldown'):
+                    logging.info("Out of range positions alert rate limited")
+                    return False
+                
+                # Format and send alert
+                alert_message = self.formatter.format_out_of_range_alert(out_of_range_positions)
+                
+                success = await self.telegram.send_message(alert_message)
+                
+                if success:
+                    # Record alert
+                    alert = Alert(
+                        level=AlertLevel.WARNING,
+                        title="Out of Range Positions",
+                        message=f"{len(out_of_range_positions)} positions are out of range",
+                        context=f"Positions: {[pos.get('position_mint', 'N/A')[:8] for pos in out_of_range_positions]}"
+                    )
+                    self._record_alert(alert)
+                    self._update_error_tracking('out_of_range_positions')
+                    
+                    logging.info(f"Out of range positions alert sent: {len(out_of_range_positions)} positions")
+                    return True
+                else:
+                    logging.error("Failed to send out of range positions alert")
+            
+            else:
+                logging.debug("All positions are in range")
+            
+            return False
+            
+        except Exception as e:
+            logging.error(f"Error checking out of range positions: {e}")
             return False
     
     async def send_system_health_alert(self, system_status: Dict[str, Any]) -> bool:

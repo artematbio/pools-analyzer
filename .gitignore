@@ -62,6 +62,7 @@ supabase_final_schema.sql
 migrate_to_lp_tables.py
 fix_treasury_schema.sql
 test_alerts_system.py
+supabase_schema_fix.sql
 
 # Generated reports (will be sent to Telegram instead)
 raydium_pool_report_*.txt
