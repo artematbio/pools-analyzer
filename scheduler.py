@@ -56,37 +56,40 @@ class RaydiumScheduler:
     """
     
     def __init__(self):
+        # Initialize components
         self.telegram = TelegramSender()
         self.formatter = ReportFormatter()
         self.bot_handler = BotCommandHandler(scheduler_instance=self)
         
-        # System configuration
-        self.port = int(os.getenv('PORT', '8080'))
-        self.target_wallet = os.getenv('TARGET_WALLET_ADDRESS', 'BpvSz1bQ7qHb7qAD748TREgSPBp6i6kukukNVgX49uxD')
+        # Check Railway environment
+        self.railway_env = os.getenv('RAILWAY_ENVIRONMENT_NAME') is not None
+        if self.railway_env:
+            logging.info("🚂 Railway deployment detected - Telegram polling disabled")
         
-        # Task scheduling
-        self.tasks: Dict[str, ScheduledTask] = {}
-        self.running = False
+        # Server configuration
+        self.port = int(os.getenv('PORT', 8080))
+        self.target_wallet = os.getenv('TARGET_WALLET_ADDRESS', 'BpvSz1bQ7qHb7qAD748TREgSPBp6i6kukukNVgX49uxD')
         self.startup_time = datetime.now(timezone.utc)
+        self.running = False
+        
+        # Task management
+        self.tasks: Dict[str, ScheduledTask] = {}
+        self._setup_scheduled_tasks()
         
         # Enable fast analyzer mode for scheduled tasks
         self._use_fast_analyzer = False
         
-        # System state
+        # System health monitoring
         self.system_health = {
-            'status': 'healthy',
+            'status': 'starting',
+            'startup_time': self.startup_time.isoformat(),
             'uptime': 0,
             'last_health_check': None,
             'services': {
-                'scheduler': 'running',
-                'telegram_bot': 'unknown',
-                'pool_analyzer': 'unknown',
-                'phi_analyzer': 'unknown'
+                'telegram_bot': 'checking',
+                'core_files': 'checking'
             }
         }
-        
-        # Setup tasks
-        self._setup_scheduled_tasks()
         
         logging.info("Raydium Scheduler initialized with fast analyzer mode disabled")
     
@@ -146,8 +149,8 @@ class RaydiumScheduler:
         
         self.running = True
         
-        # Start bot commands handler
-        bot_app = await self.bot_handler.setup_bot_commands()
+        # Disable bot commands handler to prevent Telegram API conflicts in Railway
+        bot_app = None  # await self.bot_handler.setup_bot_commands()
         
         # Send startup notification
         await alerting_system.send_startup_notification()
@@ -242,31 +245,20 @@ class RaydiumScheduler:
                 await asyncio.sleep(60)  # Wait longer on error
     
     async def _run_bot_handler(self, bot_app):
-        """Run the Telegram bot"""
-        if bot_app:
-            logging.info("🤖 Starting Telegram bot...")
-            try:
-                # Start the application (already initialized in setup_bot_commands)
-                await bot_app.start()
+        """Run the Telegram bot handler (send-only mode for Railway)"""
+        # Note: Disabled polling to prevent conflicts in Railway deployment
+        # Only send-only functionality is used via telegram_sender.py
+        logging.info("🤖 Telegram bot handler initialized (send-only mode)")
+        
+        try:
+            # Keep the handler alive but without polling
+            while self.running:
+                await asyncio.sleep(10)  # Check every 10 seconds
                 
-                # Start polling
-                await bot_app.updater.start_polling(drop_pending_updates=True)
-                
-                # Keep running while scheduler is active
-                while self.running:
-                    await asyncio.sleep(1)
-                    
-            except Exception as e:
-                logging.error(f"Bot handler error: {e}")
-            finally:
-                # Clean shutdown
-                try:
-                    if bot_app.updater and bot_app.updater.running:
-                        await bot_app.updater.stop()
-                    await bot_app.stop()
-                    await bot_app.shutdown()
-                except Exception as cleanup_error:
-                    logging.error(f"Bot cleanup error: {cleanup_error}")
+        except Exception as e:
+            logging.error(f"Bot handler error: {e}")
+            
+        logging.info("🤖 Telegram bot handler stopped")
     
     def _should_run_task(self, task: ScheduledTask, current_time: datetime) -> bool:
         """Check if task should run based on cron expression"""

@@ -21,12 +21,22 @@ class TelegramSender:
     """
     Telegram Bot API handler for sending messages and documents
     with error handling and message length management
+    
+    Note: Send-only mode for Railway deployment to prevent API conflicts
     """
     
     def __init__(self):
         self.bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
         self.chat_id = os.getenv('TELEGRAM_CHAT_ID')
-        self.bot = Bot(token=self.bot_token) if self.bot_token and Bot else None
+        
+        # Railway-specific: Create bot only if not in polling mode
+        self.railway_env = os.getenv('RAILWAY_ENVIRONMENT_NAME') is not None
+        
+        if self.railway_env:
+            logging.info("🚂 Railway environment detected - using send-only mode")
+        
+        # Lazy initialization of bot to avoid conflicts
+        self._bot = None
         self.max_message_length = 4096  # Telegram limit
         self.max_caption_length = 1024  # Telegram caption limit
         
@@ -34,6 +44,18 @@ class TelegramSender:
             logging.warning("TELEGRAM_BOT_TOKEN not found in environment variables")
         if not self.chat_id:
             logging.warning("TELEGRAM_CHAT_ID not found in environment variables")
+    
+    @property
+    def bot(self):
+        """Lazy initialization of bot to avoid conflicts"""
+        if self._bot is None and self.bot_token and Bot:
+            try:
+                self._bot = Bot(token=self.bot_token)
+                logging.info("✅ Telegram bot initialized successfully")
+            except Exception as e:
+                logging.error(f"❌ Failed to initialize Telegram bot: {e}")
+                self._bot = None
+        return self._bot
             
     async def send_message(self, text: str, parse_mode: str = 'HTML', disable_web_page_preview: bool = True) -> bool:
         """
