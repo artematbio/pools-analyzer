@@ -56,9 +56,16 @@ class RaydiumScheduler:
     """
     
     def __init__(self):
+        logging.info("🔧 Initializing Raydium Scheduler components...")
+        
         # Initialize components
+        logging.info("📱 Initializing Telegram sender...")
         self.telegram = TelegramSender()
+        
+        logging.info("📄 Initializing report formatter...")
         self.formatter = ReportFormatter()
+        
+        logging.info("🤖 Initializing bot command handler...")
         self.bot_handler = BotCommandHandler(scheduler_instance=self)
         
         # Check Railway environment
@@ -73,6 +80,7 @@ class RaydiumScheduler:
         self.running = False
         
         # Task management
+        logging.info("⏰ Setting up scheduled tasks...")
         self.tasks: Dict[str, ScheduledTask] = {}
         self._setup_scheduled_tasks()
         
@@ -91,7 +99,7 @@ class RaydiumScheduler:
             }
         }
         
-        logging.info("Raydium Scheduler initialized with fast analyzer mode disabled")
+        logging.info("✅ Raydium Scheduler initialized successfully!")
     
     def _setup_scheduled_tasks(self):
         """Setup all scheduled tasks"""
@@ -718,21 +726,59 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    scheduler = RaydiumScheduler()
+    logging.info("🚀 Initializing Raydium Pool Analyzer...")
     
-    # Setup signal handlers
-    signal.signal(signal.SIGINT, signal_handler(scheduler))
-    signal.signal(signal.SIGTERM, signal_handler(scheduler))
+    # Check environment
+    railway_env = os.getenv('RAILWAY_ENVIRONMENT_NAME') is not None
+    if railway_env:
+        logging.info("🚂 Running in Railway environment")
+    else:
+        logging.info("🏠 Running in local environment")
     
+    # Initialize scheduler with error handling
     try:
+        logging.info("📋 Creating scheduler instance...")
+        scheduler = RaydiumScheduler()
+        logging.info("✅ Scheduler initialized successfully")
+        
+        # Setup signal handlers
+        signal.signal(signal.SIGINT, signal_handler(scheduler))
+        signal.signal(signal.SIGTERM, signal_handler(scheduler))
+        logging.info("✅ Signal handlers configured")
+        
+        # Small delay to ensure everything is ready
+        await asyncio.sleep(1)
+        
+        # Start the scheduler
+        logging.info("🎯 Starting scheduler services...")
         await scheduler.start()
-    except KeyboardInterrupt:
-        logging.info("Received keyboard interrupt")
+        
+    except ImportError as e:
+        logging.error(f"❌ Import error during initialization: {e}")
+        logging.error("This usually means missing dependencies. Check requirements.txt")
+        sys.exit(1)
     except Exception as e:
-        logging.error(f"Scheduler crashed: {e}")
-        await alerting_system.send_error_alert("System Failure", str(e), level=AlertLevel.CRITICAL)
+        logging.error(f"❌ Critical error during initialization: {e}")
+        logging.error("Full traceback:", exc_info=True)
+        
+        # Try to send error alert if possible
+        try:
+            await alerting_system.send_error_alert(
+                "System Startup Failure", 
+                str(e), 
+                "Critical initialization error", 
+                level=AlertLevel.CRITICAL
+            )
+        except:
+            pass  # If alerting fails, just log and exit
+        
+        sys.exit(1)
+    except KeyboardInterrupt:
+        logging.info("⏹️ Received keyboard interrupt")
     finally:
-        scheduler.stop()
+        if 'scheduler' in locals():
+            scheduler.stop()
+            logging.info("🛑 Scheduler stopped")
 
 if __name__ == "__main__":
     asyncio.run(main()) 
