@@ -1889,6 +1889,28 @@ async def get_positions_from_multiple_wallets(wallet_addresses: List[str], heliu
                 # Добавляем информацию о кошельке к каждой позиции
                 for position in wallet_positions:
                     position['wallet_address'] = wallet_address
+                    
+                    # Добавляем поле fees_usd для совместимости с алертами
+                    if 'fees_usd' not in position:
+                        if 'total_pending_yield_usd_str' in position:
+                            try:
+                                fees_usd_value = float(position['total_pending_yield_usd_str'])
+                                position['fees_usd'] = fees_usd_value
+                                print(f"[INFO] Added fees_usd={fees_usd_value} from total_pending_yield_usd_str for position {position.get('position_mint', 'N/A')}")
+                            except (ValueError, TypeError) as e:
+                                print(f"[WARN] Could not convert total_pending_yield_usd_str to float for position {position.get('position_mint', 'N/A')}: {e}")
+                                position['fees_usd'] = 0.0
+                        elif 'unclaimed_fees_total_usd_str' in position:
+                            try:
+                                fees_usd_value = float(position['unclaimed_fees_total_usd_str'])
+                                position['fees_usd'] = fees_usd_value
+                                print(f"[INFO] Added fees_usd={fees_usd_value} from unclaimed_fees_total_usd_str for position {position.get('position_mint', 'N/A')}")
+                            except (ValueError, TypeError) as e:
+                                print(f"[WARN] Could not convert unclaimed_fees_total_usd_str to float for position {position.get('position_mint', 'N/A')}: {e}")
+                                position['fees_usd'] = 0.0
+                        else:
+                            print(f"[WARN] No fees data found for position {position.get('position_mint', 'N/A')}, setting fees_usd=0.0")
+                            position['fees_usd'] = 0.0
                 
                 all_positions.extend(wallet_positions)
                 print(f"[INFO] Found {len(wallet_positions)} positions in wallet {wallet_address}")
