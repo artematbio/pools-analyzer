@@ -1,1 +1,1 @@
-web: python scheduler.py 
+web: python debug_railway.py 
