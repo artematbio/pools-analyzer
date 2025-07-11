@@ -135,12 +135,12 @@ class RaydiumScheduler:
             description="System health monitoring"
         )
         
-        # Out of range positions check - every 30 minutes
+        # Out of range positions check - every 30 minutes (intelligent alerting)
         self.tasks['out_of_range_check'] = ScheduledTask(
             name="Out of Range Positions Check",
             cron_expression="*/30 * * * *",  # Every 30 minutes
             function=self.check_out_of_range_positions,
-            description="Check for out of range positions and send alerts"
+            description="Intelligent check: alert immediately on changes, daily reminder if no changes"
         )
         
         # Daily alert summary - if needed
@@ -616,17 +616,17 @@ class RaydiumScheduler:
             self.system_health['status'] = 'error'
     
     async def check_out_of_range_positions(self):
-        """Check for out of range positions and send alerts"""
+        """Check for out of range positions with intelligent alerting"""
         try:
             logging.info("🔍 Checking out of range positions...")
             
-            # Use the alerting system to check positions
+            # Use the alerting system to check positions with smart logic
             alert_sent = await alerting_system.check_out_of_range_positions()
             
             if alert_sent:
                 logging.info("✅ Out of range positions alert sent")
             else:
-                logging.debug("✅ No out of range positions or alert rate limited")
+                logging.debug("✅ No alert needed (no changes or all in range)")
                 
         except Exception as e:
             logging.error(f"❌ Out of range positions check failed: {e}")

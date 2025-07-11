@@ -64,12 +64,17 @@ class AlertingSystem:
         self.error_counts: Dict[str, int] = {}
         self.last_error_times: Dict[str, datetime] = {}
         
+        # Out-of-range positions intelligent tracking
+        self.last_out_of_range_positions: Optional[List[Dict[str, Any]]] = None
+        self.last_out_of_range_alert_time: Optional[datetime] = None
+        self.daily_alert_interval = timedelta(hours=24)  # Send daily alert if no changes
+        
         # Rate limiting configuration
         self.rate_limits = {
             'error_cooldown': timedelta(minutes=15),  # Don't spam same error
             'portfolio_cooldown': timedelta(hours=1),  # Portfolio change alerts
-            'position_cooldown': timedelta(minutes=30),  # Out of range position alerts
             'health_check_interval': timedelta(minutes=5)
+            # Note: position_cooldown removed - using intelligent alerting instead
         }
         
         logging.info("Alerting system initialized")
@@ -206,9 +211,61 @@ class AlertingSystem:
             await self.send_error_alert("Portfolio Monitoring", str(e), level=AlertLevel.WARNING)
             return False
     
+    def _compare_out_of_range_positions(self, current_positions: List[Dict[str, Any]], 
+                                      previous_positions: Optional[List[Dict[str, Any]]]) -> bool:
+        """
+        Compare current and previous out-of-range positions to detect changes
+        
+        Args:
+            current_positions: Current list of out-of-range positions
+            previous_positions: Previous list of out-of-range positions
+            
+        Returns:
+            bool: True if positions have changed, False otherwise
+        """
+        if previous_positions is None:
+            # First time checking - consider as change if there are positions
+            return len(current_positions) > 0
+        
+        # Compare position counts
+        if len(current_positions) != len(previous_positions):
+            return True
+        
+        # Compare individual positions by mint address
+        current_mints = set(pos.get('position_mint', '') for pos in current_positions)
+        previous_mints = set(pos.get('position_mint', '') for pos in previous_positions)
+        
+        # If the sets are different, there's a change
+        if current_mints != previous_mints:
+            return True
+        
+        # Check if position values changed significantly (>1% change)
+        for current_pos in current_positions:
+            mint = current_pos.get('position_mint', '')
+            current_value = float(current_pos.get('position_value_usd', 0))
+            
+            # Find corresponding previous position
+            previous_pos = next((pos for pos in previous_positions 
+                               if pos.get('position_mint', '') == mint), None)
+            
+            if previous_pos:
+                previous_value = float(previous_pos.get('position_value_usd', 0))
+                
+                # Check for significant value change (>1%)
+                if previous_value > 0:
+                    change_percent = abs((current_value - previous_value) / previous_value) * 100
+                    if change_percent > 1.0:
+                        return True
+        
+        return False
+    
     async def check_out_of_range_positions(self) -> bool:
         """
-        Check for out of range positions and send alerts
+        Intelligent check for out of range positions with smart alerting:
+        - Check every 30 minutes (unchanged)
+        - Send alert immediately if positions changed
+        - Send daily alert if no changes but positions still out of range
+        - No spam if no out of range positions
         
         Returns:
             bool: True if alert was sent
@@ -236,20 +293,90 @@ class AlertingSystem:
                 )
             
             # Filter out of range positions
-            out_of_range_positions = []
+            current_out_of_range_positions = []
             for pos in all_positions:
                 if pos.get('in_range') is False:
-                    out_of_range_positions.append(pos)
+                    current_out_of_range_positions.append(pos)
             
-            # Check if we need to send alert
-            if len(out_of_range_positions) > 0:
-                # Check rate limiting
-                if self._is_rate_limited('out_of_range_positions', 'position_cooldown'):
-                    logging.info("Out of range positions alert rate limited")
-                    return False
+            now = datetime.now(timezone.utc)
+            
+            # If no out of range positions, clear state and exit
+            if len(current_out_of_range_positions) == 0:
+                if self.last_out_of_range_positions and len(self.last_out_of_range_positions) > 0:
+                    # All positions are now in range - send recovery alert
+                    recovery_message = f"""✅ <b>POSITIONS BACK IN RANGE</b>
+
+🎉 All positions are now back in range!
+
+<i>Time: {now.strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"""
+                    
+                    success = await self.telegram.send_message(recovery_message)
+                    
+                    if success:
+                        alert = Alert(
+                            level=AlertLevel.INFO,
+                            title="Positions Back In Range",
+                            message="All positions are now in range",
+                            context="Recovery from out-of-range state"
+                        )
+                        self._record_alert(alert)
+                        logging.info("✅ Recovery alert sent - all positions back in range")
+                        
+                        # Clear state
+                        self.last_out_of_range_positions = []
+                        self.last_out_of_range_alert_time = now
+                        return True
                 
-                # Format and send alert
-                alert_message = self.formatter.format_out_of_range_alert(out_of_range_positions)
+                # Clear state
+                self.last_out_of_range_positions = []
+                logging.debug("✅ All positions are in range")
+                return False
+            
+            # Check if positions changed compared to last check
+            positions_changed = self._compare_out_of_range_positions(
+                current_out_of_range_positions, 
+                self.last_out_of_range_positions
+            )
+            
+            should_send_alert = False
+            alert_reason = ""
+            
+            if positions_changed:
+                # Positions changed - send alert immediately
+                should_send_alert = True
+                alert_reason = "positions_changed"
+                logging.info(f"📊 Out-of-range positions changed: {len(current_out_of_range_positions)} positions")
+            else:
+                # No changes - check if we should send daily alert
+                if self.last_out_of_range_alert_time is None:
+                    # First time - send alert
+                    should_send_alert = True
+                    alert_reason = "first_time"
+                    logging.info(f"📊 First out-of-range check: {len(current_out_of_range_positions)} positions")
+                else:
+                    # Check if 24 hours passed since last alert
+                    time_since_last_alert = now - self.last_out_of_range_alert_time
+                    if time_since_last_alert >= self.daily_alert_interval:
+                        should_send_alert = True
+                        alert_reason = "daily_reminder"
+                        logging.info(f"📊 Daily out-of-range reminder: {len(current_out_of_range_positions)} positions")
+                    else:
+                        # No need to send alert yet
+                        hours_remaining = (self.daily_alert_interval - time_since_last_alert).total_seconds() / 3600
+                        logging.debug(f"📊 Out-of-range positions unchanged, next alert in {hours_remaining:.1f} hours")
+            
+            # Send alert if needed
+            if should_send_alert:
+                # Format alert message with reason
+                alert_message = self.formatter.format_out_of_range_alert(current_out_of_range_positions)
+                
+                # Add reason context to message
+                if alert_reason == "positions_changed":
+                    alert_message += f"\n\n🔄 <b>Reason:</b> Position changes detected"
+                elif alert_reason == "daily_reminder":
+                    alert_message += f"\n\n🕒 <b>Reason:</b> Daily reminder (no changes in 24h)"
+                elif alert_reason == "first_time":
+                    alert_message += f"\n\n🆕 <b>Reason:</b> Initial detection"
                 
                 success = await self.telegram.send_message(alert_message)
                 
@@ -258,24 +385,27 @@ class AlertingSystem:
                     alert = Alert(
                         level=AlertLevel.WARNING,
                         title="Out of Range Positions",
-                        message=f"{len(out_of_range_positions)} positions are out of range",
-                        context=f"Positions: {[pos.get('position_mint', 'N/A')[:8] for pos in out_of_range_positions]}"
+                        message=f"{len(current_out_of_range_positions)} positions are out of range ({alert_reason})",
+                        context=f"Positions: {[pos.get('position_mint', 'N/A')[:8] for pos in current_out_of_range_positions]}"
                     )
                     self._record_alert(alert)
-                    self._update_error_tracking('out_of_range_positions')
                     
-                    logging.info(f"Out of range positions alert sent: {len(out_of_range_positions)} positions")
+                    # Update tracking state
+                    self.last_out_of_range_positions = current_out_of_range_positions.copy()
+                    self.last_out_of_range_alert_time = now
+                    
+                    logging.info(f"✅ Out-of-range positions alert sent: {len(current_out_of_range_positions)} positions ({alert_reason})")
                     return True
                 else:
-                    logging.error("Failed to send out of range positions alert")
-            
+                    logging.error("❌ Failed to send out-of-range positions alert")
             else:
-                logging.debug("All positions are in range")
+                # Update tracking state without sending alert
+                self.last_out_of_range_positions = current_out_of_range_positions.copy()
             
             return False
             
         except Exception as e:
-            logging.error(f"Error checking out of range positions: {e}")
+            logging.error(f"❌ Error checking out of range positions: {e}")
             return False
     
     async def send_system_health_alert(self, system_status: Dict[str, Any]) -> bool:
