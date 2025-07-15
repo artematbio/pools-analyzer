@@ -260,6 +260,62 @@ def calculate_price_from_sqrt_price_x64(
         print(f"Error calculating price from sqrtPriceX64: {e}")
         return None
 
+def get_price_from_tick(tick: int, decimals0: int = 9, decimals1: int = 9) -> Decimal:
+    """
+    Конвертирует tick в цену для Solana/Raydium (аналог функции из Ethereum)
+    
+    Args:
+        tick: Tick value
+        decimals0: Decimal places token0
+        decimals1: Decimal places token1
+        
+    Returns:
+        Цена token1 в единицах token0 с правильными decimals
+    """
+    try:
+        sqrt_price_x64 = tick_to_sqrt_price_x64(tick)
+        sqrt_price_x64_decimal = Decimal(sqrt_price_x64)
+        
+        # price_ratio = (sqrtPriceX64 / 2**64)**2 
+        price_ratio = (sqrt_price_x64_decimal / Q64)**2
+        
+        # ИСПРАВЛЕНИЕ: правильная формула для decimals
+        # Цена token1 в единицах token0 с учетом decimals
+        decimal_diff_factor = Decimal(10)**(decimals0 - decimals1)
+        price = price_ratio * decimal_diff_factor
+        
+        return price
+    except Exception as e:
+        print(f"Error getting price from tick {tick}: {e}")
+        return Decimal(0)
+
+def calculate_price_range(tick_lower: int, tick_upper: int, decimals0: int = 9, decimals1: int = 9) -> Dict[str, Decimal]:
+    """
+    Рассчитывает диапазон цен для позиции Solana/Raydium
+    
+    Args:
+        tick_lower: Нижний tick
+        tick_upper: Верхний tick  
+        decimals0: Decimal places token0
+        decimals1: Decimal places token1
+        
+    Returns:
+        Dict с price_lower и price_upper
+    """
+    try:
+        price_lower = get_price_from_tick(tick_lower, decimals0, decimals1)
+        price_upper = get_price_from_tick(tick_upper, decimals0, decimals1)
+        
+        return {
+            "price_lower": price_lower,
+            "price_upper": price_upper,
+            "range_width": price_upper - price_lower
+        }
+        
+    except Exception as e:
+        print(f"Error calculating price range: {e}")
+        return {"price_lower": Decimal(0), "price_upper": Decimal(0), "range_width": Decimal(0)}
+
 # --- Хелперы для API и парсинга ---
 
 async def get_account_info_via_httpx(rpc_url: str, account_pubkey_str: str) -> Optional[Dict[str, Any]]:
