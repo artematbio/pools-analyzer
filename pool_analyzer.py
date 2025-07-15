@@ -36,6 +36,8 @@ TARGET_POOL_ID_5 = "CkDV9Eko3KijeRpadFyJTSi4fiBbCT9d3Vdp9JhsUioM" # SOL/SPINE
 TARGET_POOL_ID_6 = "5LZawn1Pqv8Jd96nq5GPVZAz9a7jZWFD66A5JvUodRNL" # BIO/SPINE
 TARGET_POOL_ID_7 = "HMWSMe7PVmwmiRccbTW14BkKj54x3XESgBgqAshTutaA" # BIO/RIF
 TARGET_POOL_ID_8 = "FErC1cX1tH2mGRpzfXpeAiNMe6Zu2zpQSeqteDAm9W49" # BIO/URO
+TARGET_POOL_ID_9 = "FgCQoL7tcC1nkNazV5onEgWbm9UJ9nbzqo9rZCYm6Yi4" # SOL/MYCO
+TARGET_POOL_ID_10 = "HhtxoFCY7uxQKBP1AHVXhCQ3jYtRWL3n1CwBKcfoun5Q" # BIO/MYCO
 
 # Собираем их в список для итерации, отфильтровывая пустые или None значения
 PRIMARY_TARGET_POOL_IDS = [
@@ -47,7 +49,9 @@ PRIMARY_TARGET_POOL_IDS = [
         TARGET_POOL_ID_5, 
         TARGET_POOL_ID_6, 
         TARGET_POOL_ID_7,
-        TARGET_POOL_ID_8
+        TARGET_POOL_ID_8,
+        TARGET_POOL_ID_9,
+        TARGET_POOL_ID_10
     ] if pid and pid.strip()
 ]
 
@@ -202,8 +206,11 @@ TOKEN_SYMBOL_MAP = {
     "9qU3LmwKJKT2DJeGPihyTP2jc6pC7ij3hPFeyJVzuksN": "CURES",
     "GJtJuWD9qYcCkrwMBmtY1tpapV1sKfB2zUv9Q4aqpump": "RIF",
     "FvgqHMfL9yn39V79huDPy3YUNDoYJpuLWng2JfmQpump": "URO",
-    "qbioCGDnUBGX5qcK1Fc4zg19GaQEPmxHFMPMZQm4LZ8": "QBIO",
-    "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR": "SPINE"
+       "qbioCGDnUBGX5qcK1Fc4zg19GaQEPmxHFMPMZQm4LZ8": "QBIO",
+   "EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3": "MYCO",
+   "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR": "SPINE",
+   "GJtJuWD9qYcCkrwMBmtY1tpapV1sKfB2zUv9Q4aqpump": "RIF",
+   "FvgqHMfL9yn39V79huDPy3YUNDoYJpuLWng2JfmQpump": "URO"
 }
 
 # Словарь сопоставления адресов токенов с их CoinGecko ID
@@ -220,6 +227,7 @@ BIO_ADDRESS = "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ"
 RIF_ADDRESS = "GJtJuWD9qYcCkrwMBmtY1tpapV1sKfB2zUv9Q4aqpump"
 URO_ADDRESS = "FvgqHMfL9yn39V79huDPy3YUNDoYJpuLWng2JfmQpump"
 SPINE_ADDRESS = "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR"
+MYCO_ADDRESS = "EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3"
 
 # Математические хелперы
 def tick_to_sqrt_price_x64(tick: int) -> int:
@@ -1995,8 +2003,8 @@ async def main():
             
             print(f"[INFO] GeckoTerminal fetch complete. Processed prices for all {len(all_token_addresses)} unique tokens.")
 
-            # Дополнительная проверка цен для важных токенов (BIO, RIF, URO, SPINE)
-            critical_tokens = [BIO_ADDRESS, RIF_ADDRESS, URO_ADDRESS, SPINE_ADDRESS]
+            # Дополнительная проверка цен для важных токенов (BIO, RIF, URO, SPINE, MYCO)
+            critical_tokens = [BIO_ADDRESS, RIF_ADDRESS, URO_ADDRESS, SPINE_ADDRESS, MYCO_ADDRESS]
             for token in critical_tokens:
                 if token in master_token_prices:
                     price = master_token_prices[token]

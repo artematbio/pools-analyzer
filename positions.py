@@ -156,7 +156,9 @@ TOKEN_SYMBOL_MAP = {
     "9qU3LmwKJKT2DJeGPihyTP2jc6pC7ij3hPFeyJVzuksN": "CURES",
     "qbioCGDnUBGX5qcK1Fc4zg19GaQEPmxHFMPMZQm4LZ8": "QBIO",
     "EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3": "MYCO",
-    "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR": "SPINE"
+    "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR": "SPINE",
+    "GJtJuWD9qYcCkrwMBmtY1tpapV1sKfB2zUv9Q4aqpump": "RIF",
+    "FvgqHMfL9yn39V79huDPy3YUNDoYJpuLWng2JfmQpump": "URO"
 }
 # --- Конец Констант ---
 
@@ -495,10 +497,10 @@ async def fetch_token_price(mint_address: str) -> Decimal:
     except Exception as e:
         print(f"[Error] Unexpected error fetching GeckoTerminal price for {token_symbol}: {e}")
     
-    # Manual price overrides for critical tokens only if API fails
-    if price == Decimal(0):
-        # As a last resort, use fallback static values ONLY for critical tokens
-        critical_tokens = {"BIO", "CURES", "QBIO", "SOL"}
+            # Manual price overrides for critical tokens only if API fails
+        if price == Decimal(0):
+            # As a last resort, use fallback static values ONLY for critical tokens
+            critical_tokens = {"BIO", "CURES", "QBIO", "SOL", "MYCO"}
         
         if token_symbol in critical_tokens:
             if token_symbol == "BIO":
@@ -933,23 +935,43 @@ async def get_clmm_positions(
                                 except Exception as uri_err:
                                     print(f"[ERROR] Failed to fetch data from json_uri for position {position_nft_mint}: {uri_err}")
                     
-                    # Если успешно получили данные из json_uri, извлекаем информацию о невостребованных комиссиях
+                    # Если успешно получили данные из json_uri, извлекаем ВСЮ информацию о позиции
+                    uri_has_position_data = False
+                    uri_amount_a = Decimal(0)
+                    uri_amount_b = Decimal(0)
+                    uri_position_usd_value = Decimal(0)
+                    
                     if json_uri_data and isinstance(json_uri_data, dict):
                         try:
                             position_info = json_uri_data.get("positionInfo", {})
-                            unclaimed_fee_data = position_info.get("unclaimedFee", {})
                             
-                            # Извлекаем значения
+                            # Извлекаем ОСНОВНЫЕ данные позиции
+                            uri_amount_a = Decimal(str(position_info.get("amountA", 0)))
+                            uri_amount_b = Decimal(str(position_info.get("amountB", 0)))
+                            uri_position_usd_value = Decimal(str(position_info.get("usdValue", 0)))
+                            
+                            # Извлекаем данные о комиссиях
+                            unclaimed_fee_data = position_info.get("unclaimedFee", {})
                             uri_unclaimed_fee_token_a_amount = Decimal(str(unclaimed_fee_data.get("amountA", 0)))
                             uri_unclaimed_fee_token_b_amount = Decimal(str(unclaimed_fee_data.get("amountB", 0)))
                             uri_unclaimed_fee_usd_value = Decimal(str(unclaimed_fee_data.get("usdValue", 0)))
                             
-                            # Устанавливаем флаг, что будем использовать данные из json_uri
+                            # Проверяем, есть ли валидные данные позиции
+                            if uri_position_usd_value > 0 or uri_amount_a > 0 or uri_amount_b > 0:
+                                uri_has_position_data = True
+                                print(f"[INFO] Using FULL position data from json_uri for {position_nft_mint}: A={uri_amount_a}, B={uri_amount_b}, USD={uri_position_usd_value}")
+                                
+                                # Переписываем расчетные значения на данные из json_uri
+                                amount0_final = uri_amount_a
+                                amount1_final = uri_amount_b
+                                position_value_usd = uri_position_usd_value
+                            
+                            # Устанавливаем флаг для комиссий
                             if uri_unclaimed_fee_usd_value > 0:
                                 used_json_uri_for_fees = True
                                 print(f"[INFO] Using fee data from json_uri for position {position_nft_mint}. usdValue: {uri_unclaimed_fee_usd_value}")
                         except Exception as parse_uri_err:
-                            print(f"[ERROR] Failed to parse fee data from json_uri for position {position_nft_mint}: {parse_uri_err}")
+                            print(f"[ERROR] Failed to parse data from json_uri for position {position_nft_mint}: {parse_uri_err}")
                     # -------- КОНЕЦ НОВОЙ СЕКЦИИ: Получение данных из json_uri --------
                     
                     # Расчет невостребованных комиссий и их стоимости на основе ончейн-данных
@@ -1019,8 +1041,12 @@ async def get_clmm_positions(
                         print(f"[DEBUG FEES CALC]   Token B ({mintB_addr}): fees_amount={fees1_amount}, price_usd={price1_usd}")
                         print(f"[DEBUG FEES CALC]   Calculated USD value: {unclaimed_fees_usd_val}")
                     
-                    # Стоимость позиции по-прежнему вычисляем на основе ончейн-данных 
-                    position_value_usd = (amount0_final * price0_usd) + (amount1_final * price1_usd)
+                    # Стоимость позиции: если есть данные из json_uri, используем их, иначе рассчитываем
+                    if not uri_has_position_data:
+                        position_value_usd = (amount0_final * price0_usd) + (amount1_final * price1_usd)
+                        print(f"[DEBUG] Calculated USD value from onchain data: ${position_value_usd}")
+                    else:
+                        print(f"[DEBUG] Using USD value from json_uri: ${position_value_usd}")
                     
                     # Форматируем значения в строки для отчета
                     fees0_amount_str = fees0_amount_for_report.quantize(Decimal('1e-9'), rounding=ROUND_DOWN).to_eng_string().rstrip('0').rstrip('.')
