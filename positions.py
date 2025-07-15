@@ -1283,6 +1283,8 @@ async def get_clmm_positions(
                 "token1": mintB_addr,
                 "token0_price_usd": price0_usd_str,
                 "token1_price_usd": price1_usd_str,
+                "decimals0": decimals0,  # Add decimals info for proper price range calculation
+                "decimals1": decimals1,  # Add decimals info for proper price range calculation
                 "fee_tier": fee_tier_val,
                 "apr_estimate": apr_estimate,
                 "recommendation": recommendation,

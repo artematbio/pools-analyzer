@@ -2,7 +2,7 @@ import re
 import json
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal
 
 class ReportFormatter:
     """
@@ -13,33 +13,6 @@ class ReportFormatter:
     def __init__(self):
         self.max_message_length = 4096  # Telegram limit
         
-        # Математические константы для расчета цен из тиков
-        self.Q64 = Decimal(2**64)
-        self.SQRT_1_0001 = Decimal('1.0001').sqrt()
-        self.MIN_TICK = -887272
-        self.MAX_TICK = 887272
-
-    def _tick_to_price(self, tick: int, decimals0: int = 6, decimals1: int = 6) -> Optional[Decimal]:
-        """
-        Converts tick to actual price (token1/token0)
-        Based on Uniswap V3 formula: price = 1.0001^tick
-        """
-        try:
-            if not self.MIN_TICK <= tick <= self.MAX_TICK:
-                return None
-                
-            # Calculate 1.0001^tick
-            price = self.SQRT_1_0001 ** (2 * tick)
-            
-            # Adjust for token decimals: price = (amount1/10^decimals1) / (amount0/10^decimals0)
-            price_adjusted = price / Decimal(10 ** (decimals1 - decimals0))
-            
-            return price_adjusted
-            
-        except Exception as e:
-            print(f"Error converting tick {tick} to price: {e}")
-            return None
-
     def format_pool_report(self, report_content: str) -> List[str]:
         """
         Format pool analysis report for Telegram
@@ -445,7 +418,7 @@ Change: {change_sign}${change_amount:,.2f} ({change_percent:+.1f}%)
         return alert_text.strip()
 
     def format_out_of_range_alert(self, out_of_range_positions: list) -> str:
-        """Format out of range positions alert for Telegram with price range info"""
+        """Format out of range positions alert for Telegram"""
         if not out_of_range_positions:
             return ""
         
@@ -472,65 +445,39 @@ Change: {change_sign}${change_amount:,.2f} ({change_percent:+.1f}%)
             
             position_mint = pos.get('position_mint', 'N/A')[:8] + "..."
             
-            # Get price range information
-            tick_lower = pos.get('tick_lower')
-            tick_upper = pos.get('tick_upper')
-            current_price_str = pos.get('current_price', 'N/A')
-            
             alert_text += f"📍 <b>{pool_name}</b>\n"
             alert_text += f"   NFT: {position_mint}\n"
             alert_text += f"   Value: ${position_value:,.2f}\n"
             alert_text += f"   Fees: ${fees_usd:,.2f}\n"
             
-            # Add price range information if available
-            if tick_lower is not None and tick_upper is not None:
+            # Add range information if available
+            if 'tick_lower' in pos and 'tick_upper' in pos and 'current_price' in pos:
                 try:
-                    # Convert ticks to prices (assuming standard 6 decimals for simplicity)
-                    price_lower = self._tick_to_price(tick_lower, 6, 6)
-                    price_upper = self._tick_to_price(tick_upper, 6, 6)
+                    # Get price range information
+                    tick_lower = pos.get('tick_lower')
+                    tick_upper = pos.get('tick_upper')
+                    current_price = float(pos.get('current_price', 0))
                     
-                    if price_lower is not None and price_upper is not None:
-                        # Format price range
-                        if price_lower < Decimal('0.001'):
-                            price_lower_str = f"{price_lower:.8f}".rstrip('0').rstrip('.')
-                        else:
-                            price_lower_str = f"{price_lower:.6f}".rstrip('0').rstrip('.')
-                            
-                        if price_upper < Decimal('0.001'):
-                            price_upper_str = f"{price_upper:.8f}".rstrip('0').rstrip('.')
-                        else:
-                            price_upper_str = f"{price_upper:.6f}".rstrip('0').rstrip('.')
-                        
-                        alert_text += f"   📊 Range: {price_lower_str} - {price_upper_str}\n"
-                        
-                        # Show current price and deviation if available
-                        if current_price_str != 'N/A':
-                            try:
-                                current_price = Decimal(str(current_price_str))
-                                
-                                # Calculate how far outside the range
-                                if current_price < price_lower:
-                                    deviation_pct = ((price_lower - current_price) / price_lower * 100)
-                                    alert_text += f"   🔻 Current: {current_price_str} ({deviation_pct:.1f}% below range)\n"
-                                elif current_price > price_upper:
-                                    deviation_pct = ((current_price - price_upper) / price_upper * 100)
-                                    alert_text += f"   🔺 Current: {current_price_str} ({deviation_pct:.1f}% above range)\n"
-                                else:
-                                    alert_text += f"   📍 Current: {current_price_str}\n"
-                                    
-                            except (ValueError, TypeError):
-                                alert_text += f"   📍 Current: {current_price_str}\n"
-                    else:
-                        alert_text += f"   📊 Ticks: {tick_lower} - {tick_upper}\n"
-                        alert_text += f"   📍 Current: {current_price_str}\n"
-                        
+                    # For Solana positions, we need to calculate actual price range
+                    # Using the calculate_price_range function from positions module
+                    from positions import get_price_from_tick
+                    from decimal import Decimal
+                    
+                    # Get decimals from position data, fallback to standard Solana decimals (9,9)
+                    decimals0 = pos.get('decimals0', 9)
+                    decimals1 = pos.get('decimals1', 9)
+                    
+                    price_lower = float(get_price_from_tick(tick_lower, decimals0, decimals1))
+                    price_upper = float(get_price_from_tick(tick_upper, decimals0, decimals1))
+                    
+                    # Format range with proper thousands separators
+                    range_info = format_price_range(price_lower, price_upper, current_price, precision=6)
+                    alert_text += f"   {range_info}\n"
+                    
                 except Exception as e:
-                    # Fallback to showing ticks if price conversion fails
-                    alert_text += f"   📊 Ticks: {tick_lower} - {tick_upper}\n"
-                    alert_text += f"   📍 Current: {current_price_str}\n"
-            else:
-                alert_text += f"   📍 Current: {current_price_str}\n"
-                
+                    # Fallback to tick range if price calculation fails
+                    alert_text += f"   Range: {tick_lower} to {tick_upper} ticks\n"
+            
             alert_text += "\n"
         
         alert_text += f"<i>Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
@@ -714,6 +661,31 @@ def format_percentage(value: float, precision: int = 1) -> str:
 def format_currency(value: float, symbol: str = "$", precision: int = 2) -> str:
     """Format currency with symbol"""
     return f"{symbol}{value:,.{precision}f}"
+
+def format_price_range(price_lower: float, price_upper: float, current_price: float = None, precision: int = 6) -> str:
+    """Format price range with proper thousands separators and optional current price info"""
+    # Убираем trailing zeros для более читаемого вида
+    price_lower_str = f"{price_lower:,.{precision}f}".rstrip('0').rstrip('.')
+    price_upper_str = f"{price_upper:,.{precision}f}".rstrip('0').rstrip('.')
+    
+    range_str = f"Range: {price_lower_str} - {price_upper_str}"
+    
+    if current_price is not None:
+        current_str = f"{current_price:,.{precision}f}".rstrip('0').rstrip('.')
+        
+        # Calculate percentage above/below range
+        if current_price > price_upper:
+            percent_above = ((current_price - price_upper) / price_upper) * 100
+            percent_str = f"{percent_above:,.1f}"
+            range_str += f" (current: {current_str}, {percent_str}% above range)"
+        elif current_price < price_lower:
+            percent_below = ((price_lower - current_price) / price_lower) * 100
+            percent_str = f"{percent_below:,.1f}"
+            range_str += f" (current: {current_str}, {percent_str}% below range)"
+        else:
+            range_str += f" (current: {current_str}, in range)"
+    
+    return range_str
 
 # Example usage and testing
 if __name__ == "__main__":
