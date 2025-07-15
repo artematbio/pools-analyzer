@@ -251,8 +251,9 @@ def calculate_price_from_sqrt_price_x64(
         # price_ratio = (sqrtPriceX64 / 2**64)**2
         price_ratio = (sqrt_price_x64_decimal / Q64)**2
         
-        # Adjust for decimals: price = price_ratio * 10**(decimals1 - decimals0)
-        decimal_diff_factor = Decimal(10)**(decimals1 - decimals0)
+        # ИСПРАВЛЕНИЕ: правильная формула для decimals
+        # Цена token1 в единицах token0 с учетом decimals
+        decimal_diff_factor = Decimal(10)**(decimals0 - decimals1)
         price = price_ratio * decimal_diff_factor
         return price
     except Exception as e:
