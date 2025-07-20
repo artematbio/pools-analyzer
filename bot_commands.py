@@ -104,15 +104,50 @@ class BotCommandHandler:
     
     def _is_authorized(self, chat_id: str) -> bool:
         """Check if user is authorized to use commands"""
-        return str(chat_id) == str(self.authorized_chat_id)
+        # Allow commands from the same chat where reports are sent
+        authorized_chat = str(self.authorized_chat_id)
+        current_chat = str(chat_id)
+        
+        # Log for debugging
+        logging.debug(f"Command authorization check: {current_chat} vs {authorized_chat}")
+        
+        return current_chat == authorized_chat
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command"""
+        chat_type = update.effective_chat.type
+        
         if not self._is_authorized(update.effective_chat.id):
-            await update.message.reply_text("❌ Unauthorized access")
+            error_msg = f"❌ Unauthorized access\n"
+            error_msg += f"Chat ID: {update.effective_chat.id}\n"
+            error_msg += f"Authorized: {self.authorized_chat_id}\n"
+            error_msg += f"Chat type: {chat_type}"
+            await update.message.reply_text(error_msg)
             return
         
-        welcome_message = """🚀 <b>RAYDIUM POOL ANALYZER BOT</b>
+        # Different messages for groups vs private chats
+        if chat_type in ['group', 'supergroup']:
+            welcome_message = """🚀 <b>RAYDIUM POOL ANALYZER BOT</b>
+
+Бот настроен для работы в этой группе!
+
+<b>📱 Команды в группе:</b>
+Упоминайте бота: <code>@botname /command</code>
+
+<b>Available Commands:</b>
+• /help - Помощь по командам
+• /status - Статус системы  
+• /run_analysis - Запустить анализ
+• /schedule - Расписание задач
+• /test - Тест функций
+
+<b>⚡️ Автоматические отчеты:</b>
+• 📊 Анализ пулов: Ежедневно в 09:00 & 18:00 UTC
+• 🔮 PHI Анализ: Воскресенье в 18:30 UTC
+
+Все отчеты приходят в эту группу автоматически."""
+        else:
+            welcome_message = """🚀 <b>RAYDIUM POOL ANALYZER BOT</b>
 
 Welcome to your automated DeFi portfolio monitoring system!
 
@@ -133,11 +168,40 @@ The bot will automatically send analysis reports to this chat."""
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /help command"""
+        chat_type = update.effective_chat.type
+        
         if not self._is_authorized(update.effective_chat.id):
             await update.message.reply_text("❌ Unauthorized access")
             return
         
-        help_message = """🆘 <b>BOT COMMANDS HELP</b>
+        if chat_type in ['group', 'supergroup']:
+            help_message = """🆘 <b>ПОМОЩЬ ПО КОМАНДАМ БОТА</b>
+
+<b>📱 В группе упоминайте бота:</b>
+<code>@botname /command</code>
+
+<b>📊 Команды анализа:</b>
+• <code>@botname /run_analysis</code> - Запустить анализ
+• <code>@botname /schedule</code> - Расписание задач
+
+<b>🔧 Системные команды:</b>
+• <code>@botname /status</code> - Статус системы
+• <code>@botname /test</code> - Тест подключения
+
+<b>ℹ️ Информационные команды:</b>
+• <code>@botname /help</code> - Эта помощь
+• <code>@botname /start</code> - Приветствие
+
+<b>🤖 Автоматические функции:</b>
+• Ежедневные отчеты по пулам
+• Еженедельный PHI AI анализ  
+• Уведомления об ошибках
+• Алерты изменений портфеля (>5%)
+
+<b>⚠️ Важно:</b>
+Бот должен быть администратором группы ИЛИ команды нужно отправлять с упоминанием @botname"""
+        else:
+            help_message = """🆘 <b>BOT COMMANDS HELP</b>
 
 <b>📊 Analysis Commands:</b>
 /run_analysis - Manually trigger pool analysis
@@ -266,7 +330,7 @@ Use /run_analysis to trigger manual analysis."""
             test_results.append(f"❌ Bot connection: {str(e)}")
         
         # Test 2: Environment variables
-        env_vars = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'HELIUS_API_KEY', 'COINGECKO_API_KEY']
+        env_vars = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'HELIUS_API_KEY', 'COINGECKO_API_KEY', 'THEGRAPH_API_KEY']
         missing_vars = [var for var in env_vars if not os.getenv(var)]
         
         if not missing_vars:
