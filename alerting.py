@@ -408,6 +408,206 @@ class AlertingSystem:
             logging.error(f"❌ Error checking out of range positions: {e}")
             return False
     
+    async def check_range_proximity_positions(self) -> bool:
+        """
+        Проверяет позиции, приближающиеся к границам диапазона (5% порог)
+        
+        Returns:
+            bool: True if alert was sent
+        """
+        try:
+            # Import здесь чтобы избежать circular import
+            from pool_analyzer import TARGET_WALLET_ADDRESSES, get_positions_from_multiple_wallets
+            from range_proximity_calculator import filter_positions_approaching_bounds
+            import httpx
+            import os
+            
+            # Получаем учетные данные
+            helius_rpc_url = os.getenv('HELIUS_RPC_URL')
+            helius_api_key = os.getenv('HELIUS_API_KEY')
+            
+            if not helius_rpc_url or not helius_api_key:
+                logging.warning("Helius credentials not configured for proximity checks")
+                return False
+            
+            # Получаем все позиции
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                all_positions = await get_positions_from_multiple_wallets(
+                    TARGET_WALLET_ADDRESSES, 
+                    helius_rpc_url, 
+                    helius_api_key
+                )
+            
+            # Фильтруем позиции, приближающиеся к границам (5% порог)
+            approaching_positions = filter_positions_approaching_bounds(all_positions, threshold_percent=5.0)
+            
+            now = datetime.now(timezone.utc)
+            
+            # Если нет приближающихся позиций, очищаем состояние
+            if len(approaching_positions) == 0:
+                if hasattr(self, 'last_proximity_positions') and self.last_proximity_positions:
+                    # Все позиции больше не приближаются к границам
+                    recovery_message = f"""✅ <b>RANGE PROXIMITY RECOVERY</b>
+
+🎉 No positions are approaching range boundaries!
+
+All positions are now safely within their ranges.
+
+<i>Time: {now.strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"""
+                    
+                    success = await self.telegram.send_message(recovery_message)
+                    
+                    if success:
+                        alert = Alert(
+                            level=AlertLevel.INFO,
+                            title="Range Proximity Recovery",
+                            message="No positions approaching boundaries",
+                            context="Recovery from proximity warnings"
+                        )
+                        self._record_alert(alert)
+                        logging.info("✅ Proximity recovery alert sent")
+                        
+                        # Очищаем состояние
+                        self.last_proximity_positions = []
+                        self.last_proximity_alert_time = now
+                        return True
+                
+                # Очищаем состояние
+                self.last_proximity_positions = []
+                logging.debug("✅ No positions approaching range boundaries")
+                return False
+            
+            # Проверяем изменения в приближающихся позициях
+            if not hasattr(self, 'last_proximity_positions'):
+                self.last_proximity_positions = []
+                self.last_proximity_alert_time = None
+            
+            # Сравниваем с предыдущими результатами
+            positions_changed = self._compare_proximity_positions(
+                approaching_positions, 
+                self.last_proximity_positions
+            )
+            
+            should_send_alert = False
+            alert_reason = ""
+            
+            if positions_changed:
+                # Позиции изменились - отправляем алерт немедленно
+                should_send_alert = True
+                alert_reason = "proximity_changes"
+                logging.info(f"📊 Range proximity changes detected: {len(approaching_positions)} positions")
+            else:
+                # Нет изменений - проверяем ежедневный интервал
+                if self.last_proximity_alert_time is None:
+                    should_send_alert = True
+                    alert_reason = "first_proximity_detection"
+                    logging.info(f"📊 First proximity detection: {len(approaching_positions)} positions")
+                else:
+                    time_since_last_alert = now - self.last_proximity_alert_time
+                    if time_since_last_alert >= self.daily_alert_interval:
+                        should_send_alert = True
+                        alert_reason = "daily_proximity_reminder"
+                        logging.info(f"📊 Daily proximity reminder: {len(approaching_positions)} positions")
+                    else:
+                        hours_remaining = (self.daily_alert_interval - time_since_last_alert).total_seconds() / 3600
+                        logging.debug(f"📊 Proximity positions unchanged, next alert in {hours_remaining:.1f} hours")
+            
+            # Отправляем алерт если нужно
+            if should_send_alert:
+                alert_message = self.formatter.format_range_proximity_alert(approaching_positions)
+                
+                # Добавляем контекст причины
+                if alert_reason == "proximity_changes":
+                    alert_message += f"\n\n🔄 <b>Reason:</b> Position proximity changes detected"
+                elif alert_reason == "daily_proximity_reminder":
+                    alert_message += f"\n\n🕒 <b>Reason:</b> Daily reminder (proximity unchanged)"
+                elif alert_reason == "first_proximity_detection":
+                    alert_message += f"\n\n🆕 <b>Reason:</b> Initial proximity detection"
+                
+                success = await self.telegram.send_message(alert_message)
+                
+                if success:
+                    alert = Alert(
+                        level=AlertLevel.WARNING,
+                        title="Range Proximity Warning",
+                        message=f"{len(approaching_positions)} positions approaching boundaries ({alert_reason})",
+                        context=f"Positions: {[pos.get('position_mint', 'N/A')[:8] for pos in approaching_positions]}"
+                    )
+                    self._record_alert(alert)
+                    
+                    # Обновляем состояние отслеживания
+                    self.last_proximity_positions = approaching_positions.copy()
+                    self.last_proximity_alert_time = now
+                    
+                    logging.info(f"✅ Range proximity alert sent: {len(approaching_positions)} positions ({alert_reason})")
+                    return True
+                else:
+                    logging.error("❌ Failed to send range proximity alert")
+            else:
+                # Обновляем состояние без отправки алерта
+                self.last_proximity_positions = approaching_positions.copy()
+            
+            return False
+            
+        except Exception as e:
+            logging.error(f"Error checking range proximity: {e}")
+            await self.send_error_alert("Range Proximity Check", str(e), level=AlertLevel.WARNING)
+            return False
+    
+    def _compare_proximity_positions(self, current_positions: List[Dict[str, Any]], 
+                                   previous_positions: Optional[List[Dict[str, Any]]]) -> bool:
+        """
+        Сравнивает текущие и предыдущие позиции, приближающиеся к границам
+        
+        Args:
+            current_positions: Текущий список приближающихся позиций
+            previous_positions: Предыдущий список приближающихся позиций
+            
+        Returns:
+            bool: True если позиции изменились
+        """
+        if previous_positions is None:
+            return len(current_positions) > 0
+        
+        # Сравниваем количество
+        if len(current_positions) != len(previous_positions):
+            return True
+        
+        # Сравниваем позиции по mint address
+        current_mints = set(pos.get('position_mint', '') for pos in current_positions)
+        previous_mints = set(pos.get('position_mint', '') for pos in previous_positions)
+        
+        if current_mints != previous_mints:
+            return True
+        
+        # Проверяем изменения в proximity статусе
+        for current_pos in current_positions:
+            mint = current_pos.get('position_mint', '')
+            previous_pos = next((p for p in previous_positions if p.get('position_mint', '') == mint), None)
+            
+            if previous_pos:
+                current_proximity = current_pos.get('proximity_info', {})
+                previous_proximity = previous_pos.get('proximity_info', {})
+                
+                # Проверяем изменения в статусе приближения
+                current_status = current_proximity.get('proximity_status', '')
+                previous_status = previous_proximity.get('proximity_status', '')
+                
+                if current_status != previous_status:
+                    return True
+                
+                # Проверяем значительные изменения в процентах (>1%)
+                current_lower = current_proximity.get('distance_to_lower_percent', 0)
+                current_upper = current_proximity.get('distance_to_upper_percent', 0)
+                previous_lower = previous_proximity.get('distance_to_lower_percent', 0)
+                previous_upper = previous_proximity.get('distance_to_upper_percent', 0)
+                
+                if (abs(current_lower - previous_lower) > 1.0 or 
+                    abs(current_upper - previous_upper) > 1.0):
+                    return True
+        
+        return False
+    
     async def send_system_health_alert(self, system_status: Dict[str, Any]) -> bool:
         """
         Send system health status alert
@@ -481,10 +681,11 @@ class AlertingSystem:
 🔵 Base (Uniswap V3)
 
 <b>Schedule:</b>
-• Ethereum Positions: Every 4 hours
-• Base Positions: Every 4 hours (+2h offset)
-• DAO Pools Snapshots: 09:30 & 21:30 UTC
-• Multi-Chain Reports: 12:00 & 20:00 UTC
+• Solana Positions: Every 4 hours (00:00, 04:00, 08:00, 12:00, 16:00, 20:00)
+• Ethereum Positions: Every 4 hours (+20min offset)
+• Base Positions: Every 4 hours (+40min offset)
+• DAO Pools Snapshots: Every 4 hours after positions (+70min)
+• Multi-Chain Reports: 2x daily (13:30 & 21:30 UTC)
 • PHI Analysis: Sunday 18:30 UTC
 
 🔄 Multi-chain system ready for automated monitoring"""

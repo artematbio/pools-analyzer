@@ -142,10 +142,11 @@ Mention the bot: <code>@botname /command</code>
 • /test - Test functions
 
 <b>⚡️ Automated Reports:</b>
-• 🔵 Ethereum Positions: Every 4 hours
-• 🔵 Base Positions: Every 4 hours (+2h offset)
-• 📊 DAO Pool Snapshots: 09:30 & 21:30 UTC
-• 🚀 Multi-Chain Reports: 12:00 & 20:00 UTC
+• 🟣 Solana Positions: Every 4 hours (00:00, 04:00, 08:00, 12:00, 16:00, 20:00)
+• 🔵 Ethereum Positions: Every 4 hours (+20min offset)
+• 🔵 Base Positions: Every 4 hours (+40min offset)
+• 📊 DAO Pool Snapshots: Every 4 hours after positions (+70min)
+• 🚀 Multi-Chain Reports: 2x daily (13:30 & 21:30 UTC)
 • 🔮 PHI Analysis: Sunday at 18:30 UTC
 
 <b>🌐 Supported Networks:</b>
@@ -167,10 +168,11 @@ Welcome to your automated Multi-Chain DeFi portfolio monitoring system!
 /test - Test bot functionality
 
 <b>Automated Schedule:</b>
-• 🔵 Ethereum Positions: Every 4 hours
-• 🔵 Base Positions: Every 4 hours (+2h offset)
-• 📊 DAO Pool Snapshots: 09:30 & 21:30 UTC
-• 🚀 Multi-Chain Reports: 12:00 & 20:00 UTC
+• 🟣 Solana Positions: Every 4 hours (00:00, 04:00, 08:00, 12:00, 16:00, 20:00)
+• 🔵 Ethereum Positions: Every 4 hours (+20min offset)
+• 🔵 Base Positions: Every 4 hours (+40min offset)
+• 📊 DAO Pool Snapshots: Every 4 hours after positions (+70min)
+• 🚀 Multi-Chain Reports: 2x daily (13:30 & 21:30 UTC)
 • 🔮 PHI Analysis: Weekly on Sunday at 18:30 UTC
 
 <b>🌐 Supported Networks:</b>
@@ -213,6 +215,8 @@ The bot will automatically send analysis reports to this chat."""
 • Weekly PHI AI analysis
 • Error notifications
 • Portfolio change alerts (>5%)
+• Out of range position alerts (every 30 min)
+• Range proximity warnings (every 15 min, 5% threshold)
 
 <b>⚠️ Important:</b>
 Bot must be a group admin OR commands must be sent with @botname mention"""
@@ -232,10 +236,12 @@ Bot must be a group admin OR commands must be sent with @botname mention"""
 /start - Welcome message and overview
 
 <b>🤖 Automated Features:</b>
-• Daily pool analysis reports
+• Multi-chain position reports (every 4 hours)
 • Weekly PHI AI analysis
 • Error alerts and notifications
 • Portfolio change alerts (>5%)
+• Out of range position alerts (every 30 min)
+• Range proximity warnings (every 15 min, 5% threshold)
 
 <b>📞 Support:</b>
 If you encounter issues, check /status first.
@@ -311,7 +317,8 @@ The bot runs on Railway with automatic restarts."""
             schedule_message += f"""
 
 <b>🔄 Regular Schedule:</b>
-• Pool Analysis: Daily at 09:00 & 18:00 UTC
+• Multi-Chain Data Collection: Every 4 hours (synced)
+• Telegram Reports: 2x daily (13:30 & 21:30 UTC)
 • PHI Analysis: Every Sunday at 18:30 UTC
 
 <b>⚙️ System Info:</b>
@@ -412,11 +419,24 @@ Use /run_analysis to trigger manual analysis."""
         now = datetime.now(timezone.utc)
         tasks = []
         
-        # Calculate next Ethereum positions analysis (every 4 hours: 0, 4, 8, 12, 16, 20)
+        # Calculate next Solana positions analysis (every 4 hours: 0, 4, 8, 12, 16, 20 at :00)
+        solana_hours = [0, 4, 8, 12, 16, 20]
+        next_solana_hour = min([h for h in solana_hours if h > now.hour] + [solana_hours[0]])
+        next_solana_time = now.replace(hour=next_solana_hour, minute=0, second=0, microsecond=0)
+        if next_solana_hour <= now.hour:
+            next_solana_time += timedelta(days=1)
+        
+        tasks.append({
+            'name': 'Solana Positions',
+            'time': next_solana_time.strftime('%Y-%m-%d %H:%M UTC'),
+            'timestamp': next_solana_time
+        })
+        
+        # Calculate next Ethereum positions analysis (every 4 hours: 0, 4, 8, 12, 16, 20 at :20)
         eth_hours = [0, 4, 8, 12, 16, 20]
-        next_eth_hour = min([h for h in eth_hours if h > now.hour] + [eth_hours[0]])
-        next_eth_time = now.replace(hour=next_eth_hour, minute=0, second=0, microsecond=0)
-        if next_eth_hour <= now.hour:
+        next_eth_hour = min([h for h in eth_hours if h > now.hour or (h == now.hour and now.minute < 20)] + [eth_hours[0]])
+        next_eth_time = now.replace(hour=next_eth_hour, minute=20, second=0, microsecond=0)
+        if next_eth_hour < now.hour or (next_eth_hour == now.hour and now.minute >= 20):
             next_eth_time += timedelta(days=1)
         
         tasks.append({
@@ -425,11 +445,11 @@ Use /run_analysis to trigger manual analysis."""
             'timestamp': next_eth_time
         })
         
-        # Calculate next Base positions analysis (every 4 hours +2h offset: 2, 6, 10, 14, 18, 22)
-        base_hours = [2, 6, 10, 14, 18, 22]
-        next_base_hour = min([h for h in base_hours if h > now.hour] + [base_hours[0]])
-        next_base_time = now.replace(hour=next_base_hour, minute=0, second=0, microsecond=0)
-        if next_base_hour <= now.hour:
+        # Calculate next Base positions analysis (every 4 hours: 0, 4, 8, 12, 16, 20 at :40)
+        base_hours = [0, 4, 8, 12, 16, 20]
+        next_base_hour = min([h for h in base_hours if h > now.hour or (h == now.hour and now.minute < 40)] + [base_hours[0]])
+        next_base_time = now.replace(hour=next_base_hour, minute=40, second=0, microsecond=0)
+        if next_base_hour < now.hour or (next_base_hour == now.hour and now.minute >= 40):
             next_base_time += timedelta(days=1)
         
         tasks.append({
@@ -438,21 +458,22 @@ Use /run_analysis to trigger manual analysis."""
             'timestamp': next_base_time
         })
         
-        # Calculate next DAO pools snapshots (09:30 and 21:30 daily)
-        for hour, minute in [(9, 30), (21, 30)]:
-            next_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            if next_time <= now:
-                next_time += timedelta(days=1)
-            
-            tasks.append({
-                'name': 'DAO Pools Snapshot',
-                'time': next_time.strftime('%Y-%m-%d %H:%M UTC'),
-                'timestamp': next_time
-            })
+        # Calculate next DAO pools snapshots (every 4 hours: 1, 5, 9, 13, 17, 21 at :10)
+        dao_hours = [1, 5, 9, 13, 17, 21]
+        next_dao_hour = min([h for h in dao_hours if h > now.hour or (h == now.hour and now.minute < 10)] + [dao_hours[0]])
+        next_dao_time = now.replace(hour=next_dao_hour, minute=10, second=0, microsecond=0)
+        if next_dao_hour < now.hour or (next_dao_hour == now.hour and now.minute >= 10):
+            next_dao_time += timedelta(days=1)
         
-        # Calculate next multichain reports (12:00 and 20:00 daily)
-        for hour in [12, 20]:
-            next_time = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+        tasks.append({
+            'name': 'DAO Pools Snapshot',
+            'time': next_dao_time.strftime('%Y-%m-%d %H:%M UTC'),
+            'timestamp': next_dao_time
+        })
+        
+        # Calculate next multichain reports (13:30 and 21:30 daily)
+        for hour, minute in [(13, 30), (21, 30)]:
+            next_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
             if next_time <= now:
                 next_time += timedelta(days=1)
             

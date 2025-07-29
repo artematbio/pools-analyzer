@@ -507,6 +507,88 @@ Change: {change_sign}${change_amount:,.2f} ({change_percent:+.1f}%)
         
         return alert_text.strip()
     
+    def format_range_proximity_alert(self, approaching_positions: list) -> str:
+        """Format range proximity alert for Telegram"""
+        if not approaching_positions:
+            return ""
+        
+        alert_text = f"""🔄 <b>RANGE PROXIMITY WARNING</b>
+
+{len(approaching_positions)} position(s) are approaching range boundaries (within 5%):
+
+"""
+        
+        for pos in approaching_positions:
+            pool_name = pos.get('pool_name', 'Unknown Pool')
+            
+            # Safe conversion to float for formatting
+            try:
+                position_value = float(pos.get('position_value_usd', 0))
+            except (ValueError, TypeError):
+                position_value = 0.0
+            
+            try:
+                fees_usd = float(pos.get('fees_usd', 0))
+            except (ValueError, TypeError):
+                fees_usd = 0.0
+            
+            position_mint = pos.get('position_mint', 'N/A')[:8] + "..."
+            proximity_info = pos.get('proximity_info', {})
+            
+            alert_text += f"📍 <b>{pool_name}</b>\n"
+            alert_text += f"   NFT: {position_mint}\n"
+            alert_text += f"   Value: ${position_value:,.2f}\n"
+            alert_text += f"   Fees: ${fees_usd:,.2f}\n"
+            
+            # Add proximity information
+            proximity_status = proximity_info.get('proximity_status', 'unknown')
+            distance_lower = proximity_info.get('distance_to_lower_percent')
+            distance_upper = proximity_info.get('distance_to_upper_percent')
+            
+            if proximity_status == 'approaching_lower_bound' and distance_lower is not None:
+                alert_text += f"   ⚠️ <b>Approaching LOWER bound</b>: {distance_lower:.1f}% from edge\n"
+            elif proximity_status == 'approaching_upper_bound' and distance_upper is not None:
+                alert_text += f"   ⚠️ <b>Approaching UPPER bound</b>: {distance_upper:.1f}% from edge\n"
+            elif proximity_status == 'narrow_range_warning':
+                alert_text += f"   ⚠️ <b>Very narrow range</b>: {distance_lower:.1f}% | {distance_upper:.1f}%\n"
+            else:
+                alert_text += f"   ⚠️ Range proximity warning\n"
+            
+            # Add range information if available
+            if 'tick_lower' in pos and 'tick_upper' in pos and 'current_price' in pos:
+                try:
+                    # Get price range information
+                    tick_lower = pos.get('tick_lower')
+                    tick_upper = pos.get('tick_upper')
+                    current_price = float(pos.get('current_price', 0))
+                    
+                    # For Solana positions, we need to calculate actual price range
+                    # Using the calculate_price_range function from positions module
+                    from positions import get_price_from_tick
+                    from decimal import Decimal
+                    
+                    # Get decimals from position data, fallback to standard decimals
+                    decimals0 = pos.get('decimals0', 9)
+                    decimals1 = pos.get('decimals1', 9)
+                    
+                    price_lower = float(get_price_from_tick(tick_lower, decimals0, decimals1))
+                    price_upper = float(get_price_from_tick(tick_upper, decimals0, decimals1))
+                    
+                    # Format range with proper thousands separators
+                    range_info = format_price_range(price_lower, price_upper, current_price, precision=6)
+                    alert_text += f"   {range_info}\n"
+                    
+                except Exception as e:
+                    # Fallback to tick range if price calculation fails
+                    alert_text += f"   Range: {tick_lower} to {tick_upper} ticks\n"
+            
+            alert_text += "\n"
+        
+        alert_text += f"💡 <b>Recommendation:</b> Monitor these positions closely and consider adjusting ranges if needed.\n\n"
+        alert_text += f"<i>Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
+        
+        return alert_text.strip()
+    
     def _extract_total_value(self, report_content: str) -> float:
         """Extract total portfolio value from report"""
         try:

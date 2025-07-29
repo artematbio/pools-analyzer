@@ -102,46 +102,50 @@ class RaydiumScheduler:
         logging.info("✅ Raydium Scheduler initialized successfully!")
     
     def _setup_scheduled_tasks(self):
-        """Setup all scheduled tasks"""
+        """Setup all scheduled tasks with proper data collection sequence"""
         
-        # Pool analysis - twice daily
-        self.tasks['pool_analysis_morning'] = ScheduledTask(
-            name="Pool Analysis (Morning)",
-            cron_expression="0 9 * * *",  # 09:00 UTC daily
+        # ===== СИНХРОНИЗИРОВАННЫЙ СБОР ДАННЫХ КАЖДЫЕ 4 ЧАСА =====
+        
+        # Solana positions - every 4 hours at :00
+        self.tasks['solana_positions_analysis'] = ScheduledTask(
+            name="Solana Positions Analysis",
+            cron_expression="0 0,4,8,12,16,20 * * *",  # 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC
             function=self.run_pool_analysis,
-            description="Daily morning portfolio analysis"
+            description="Solana Raydium CLMM positions monitoring"
         )
         
-        self.tasks['pool_analysis_evening'] = ScheduledTask(
-            name="Pool Analysis (Evening)", 
-            cron_expression="0 18 * * *",  # 18:00 UTC daily
-            function=self.run_pool_analysis,
-            description="Daily evening portfolio analysis"
-        )
-        
-        # НОВЫЕ МУЛЬТИ-ЧЕЙН ЗАДАЧИ
-        # Multi-chain Telegram report - twice daily at 12:00 and 20:00 UTC
-        self.tasks['multichain_telegram_report'] = ScheduledTask(
-            name="Multi-Chain Telegram Report",
-            cron_expression="0 12,20 * * *",  # 12:00 and 20:00 UTC daily
-            function=self.run_multichain_telegram_report,
-            description="Comprehensive multi-chain portfolio report for Telegram"
-        )
-        
-        # Ethereum positions analysis - every 4 hours
+        # Ethereum positions - every 4 hours at :20 (20 min after Solana)
         self.tasks['ethereum_positions_analysis'] = ScheduledTask(
             name="Ethereum Positions Analysis",
-            cron_expression="0 */4 * * *",  # Every 4 hours
+            cron_expression="20 0,4,8,12,16,20 * * *",  # 00:20, 04:20, 08:20, 12:20, 16:20, 20:20 UTC
             function=self.run_ethereum_positions_analysis,
             description="Ethereum Uniswap v3 positions monitoring"
         )
         
-        # Base positions analysis - every 4 hours (offset by 2 hours)
+        # Base positions - every 4 hours at :40 (40 min after Solana)
         self.tasks['base_positions_analysis'] = ScheduledTask(
             name="Base Positions Analysis", 
-            cron_expression="0 2,6,10,14,18,22 * * *",  # Every 4 hours offset by 2
+            cron_expression="40 0,4,8,12,16,20 * * *",  # 00:40, 04:40, 08:40, 12:40, 16:40, 20:40 UTC
             function=self.run_base_positions_analysis,
             description="Base Uniswap v3 positions monitoring"
+        )
+        
+        # DAO Pools Snapshots - every 4 hours at :10 (70 min after Solana start)
+        self.tasks['dao_pools_snapshots'] = ScheduledTask(
+            name="DAO Pools Snapshots",
+            cron_expression="10 1,5,9,13,17,21 * * *",  # 01:10, 05:10, 09:10, 13:10, 17:10, 21:10 UTC
+            function=self.run_dao_pools_snapshots,
+            description="Collect snapshots of all DAO pools after fresh position data"
+        )
+        
+        # ===== ОТЧЕТЫ НА ОСНОВЕ СВЕЖИХ ДАННЫХ =====
+        
+        # Multi-chain Telegram report - twice daily after DAO snapshots
+        self.tasks['multichain_telegram_report'] = ScheduledTask(
+            name="Multi-Chain Telegram Report",
+            cron_expression="30 13,21 * * *",  # 13:30 and 21:30 UTC (after DAO snapshots)
+            function=self.run_multichain_telegram_report,
+            description="Comprehensive multi-chain portfolio report for Telegram"
         )
         
         # Token data refresh - daily at 8:00 UTC
@@ -176,20 +180,20 @@ class RaydiumScheduler:
             description="Intelligent check: alert immediately on changes, daily reminder if no changes"
         )
         
+        # Range proximity check - every 15 minutes (early warning system)
+        self.tasks['range_proximity_check'] = ScheduledTask(
+            name="Range Proximity Check",
+            cron_expression="*/15 * * * *",  # Every 15 minutes
+            function=self.check_range_proximity_positions,
+            description="Early warning: alert when positions approach range boundaries (5% threshold)"
+        )
+        
         # Daily alert summary - if needed
         self.tasks['daily_alert_summary'] = ScheduledTask(
             name="Daily Alert Summary",
             cron_expression="0 23 * * *",  # 23:00 UTC daily
             function=self.send_daily_summary,
             description="Daily summary of alerts and issues"
-        )
-    
-        # DAO Pools Snapshots - twice daily at 09:30 and 21:30 UTC
-        self.tasks['dao_pools_snapshots'] = ScheduledTask(
-            name="DAO Pools Snapshots",
-            cron_expression="30 9,21 * * *",  # 09:30 and 21:30 UTC daily
-            function=self.run_dao_pools_snapshots,
-            description="Collect snapshots of all DAO pools with TVL > $10k for Metabase dashboard"
         )
     
     async def start(self):
@@ -892,6 +896,27 @@ asyncio.run(main())
             await alerting_system.send_error_alert(
                 "Out of Range Check",
                 f"Failed to check out of range positions: {str(e)}",
+                "Scheduled task execution"
+            )
+    
+    async def check_range_proximity_positions(self):
+        """Check for positions approaching range boundaries (5% threshold)"""
+        try:
+            logging.info("🔍 Checking range proximity positions...")
+            
+            # Use the alerting system to check proximity with smart logic
+            alert_sent = await alerting_system.check_range_proximity_positions()
+            
+            if alert_sent:
+                logging.info("✅ Range proximity alert sent")
+            else:
+                logging.debug("✅ No proximity alert needed (no changes or all safe)")
+                
+        except Exception as e:
+            logging.error(f"❌ Range proximity check failed: {e}")
+            await alerting_system.send_error_alert(
+                "Range Proximity Check",
+                f"Failed to check range proximity: {str(e)}",
                 "Scheduled task execution"
             )
     

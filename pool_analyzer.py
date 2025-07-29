@@ -1041,7 +1041,10 @@ async def analyze_single_position(position_nft_mint: str, position_pda: str, tar
             "position_usd_value": str(position_usd_value),
             # Добавляем актуальные цены токенов, чтобы они использовались при обновлении данных в main()
             "token0_price_usd": str(actual_token0_price),
-            "token1_price_usd": str(actual_token1_price)
+            "token1_price_usd": str(actual_token1_price),
+            # ✅ ДОБАВЛЯЕМ amounts В ПРАВИЛЬНОМ ФОРМАТЕ ДЛЯ SUPABASE
+            "token0_amount": float(amount0_adjusted),
+            "token1_amount": float(amount1_adjusted)
         }
         
         return position_analysis
