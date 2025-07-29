@@ -313,41 +313,56 @@ class DAOPoolsSnapshotGenerator:
         return fallback_price
 
     async def _fetch_missing_fdv_from_api(self, dao_tokens: Dict[str, Dict[str, Any]]):
-        """Получить недостающие FDV через GeckoTerminal API"""
-        print("🔍 Дополняем недостающие FDV через GeckoTerminal API...")
+        """Получить актуальные FDV через GeckoTerminal API (максимальный из всех сетей)"""
+        print("🔍 Получаем актуальные FDV через GeckoTerminal API...")
         
         async with httpx.AsyncClient() as client:
             for token_symbol, token_info in dao_tokens.items():
-                # Проверяем нужно ли получать FDV
-                if token_info.get('fdv_usd', 0) <= 0:
-                    # Ищем токен на Solana (большинство новых токенов там)
-                    solana_address = token_info['addresses'].get('solana')
-                    if solana_address:
-                        try:
-                            url = f'https://api.geckoterminal.com/api/v2/networks/solana/tokens/{solana_address}'
-                            response = await client.get(url, timeout=10)
+                # ВСЕГДА обновляем FDV для получения актуальных данных
+                best_fdv = 0
+                best_price = 0
+                best_network = None
+                
+                # Проверяем все сети и выбираем максимальный FDV
+                for network, address in token_info['addresses'].items():
+                    if not address:
+                        continue
+                        
+                    try:
+                        network_map = {'ethereum': 'eth', 'base': 'base', 'solana': 'solana'}
+                        network_id = network_map.get(network, network)
+                        
+                        url = f'https://api.geckoterminal.com/api/v2/networks/{network_id}/tokens/{address}'
+                        response = await client.get(url, timeout=10)
+                        
+                        if response.status_code == 200:
+                            data = response.json()
+                            attrs = data.get('data', {}).get('attributes', {})
                             
-                            if response.status_code == 200:
-                                data = response.json()
-                                attrs = data.get('data', {}).get('attributes', {})
-                                
-                                fdv_usd = attrs.get('fdv_usd')
-                                price_usd = attrs.get('price_usd')
-                                
-                                if fdv_usd:
-                                    token_info['fdv_usd'] = float(fdv_usd)
-                                    print(f"   ✅ {token_symbol}: FDV ${float(fdv_usd):,.0f}")
-                                
-                                if price_usd and token_info.get('price_usd', 0) <= 0:
-                                    token_info['price_usd'] = float(price_usd)
+                            fdv_usd = attrs.get('fdv_usd')
+                            price_usd = attrs.get('price_usd')
                             
-                            # Задержка между запросами
-                            await asyncio.sleep(0.2)
-                            
-                        except Exception as e:
-                            print(f"   ❌ {token_symbol}: {e}")
-                    else:
-                        print(f"   ⚠️ {token_symbol}: нет адреса на Solana")
+                            if fdv_usd and float(fdv_usd) > best_fdv:
+                                best_fdv = float(fdv_usd)
+                                best_network = network
+                                if price_usd:
+                                    best_price = float(price_usd)
+                        
+                        # Задержка между запросами
+                        await asyncio.sleep(0.3)
+                        
+                    except Exception as e:
+                        print(f"   ⚠️ {token_symbol} ({network}): {e}")
+                
+                # Сохраняем лучшие данные
+                if best_fdv > 0:
+                    token_info['fdv_usd'] = best_fdv
+                    print(f"   ✅ {token_symbol}: FDV ${best_fdv:,.0f} (из {best_network})")
+                    
+                    if best_price > 0 and token_info.get('price_usd', 0) <= 0:
+                        token_info['price_usd'] = best_price
+                else:
+                    print(f"   ⚠️ {token_symbol}: не удалось получить FDV")
     
     async def load_our_positions_from_supabase(self) -> Dict[str, Dict[str, Any]]:
         """Загрузить наши позиции из Supabase lp_position_snapshots"""
@@ -738,12 +753,12 @@ class DAOPoolsSnapshotGenerator:
         
         try:
             # Цена 24 часа назад
-            price_24h = self.supabase_handler.get_historical_token_price(token_symbol, 1)
+            price_24h = supabase_handler.get_historical_token_price(token_symbol, 1)
             if price_24h and price_24h > 0:
                 changes['price_change_24h_percent'] = ((current_price - price_24h) / price_24h) * 100
             
             # Цена 7 дней назад
-            price_7d = self.supabase_handler.get_historical_token_price(token_symbol, 7)
+            price_7d = supabase_handler.get_historical_token_price(token_symbol, 7)
             if price_7d and price_7d > 0:
                 changes['price_change_7d_percent'] = ((current_price - price_7d) / price_7d) * 100
                 
@@ -759,7 +774,7 @@ class DAOPoolsSnapshotGenerator:
         }
         
         try:
-            tvl_7d = self.supabase_handler.get_historical_token_tvl(token_symbol, 7)
+            tvl_7d = supabase_handler.get_historical_token_tvl(token_symbol, 7)
             if tvl_7d and tvl_7d > 0:
                 changes['tvl_change_7d_percent'] = ((current_total_tvl - tvl_7d) / tvl_7d) * 100
                 
@@ -890,10 +905,14 @@ class DAOPoolsSnapshotGenerator:
         try:
             print(f"💾 Сохраняем {len(snapshots)} снапшотов в Supabase...")
             
-            # Очищаем старые записи за сегодня
+            # Очищаем записи ТОЛЬКО за сегодня (точный диапазон дня)
             today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-            delete_result = supabase_handler.client.table('dao_pool_snapshots').delete().gte('created_at', f'{today}T00:00:00Z').execute()
-            print(f"   🗑️ Удалено старых записей за сегодня: {len(delete_result.data) if delete_result.data else 0}")
+            today_start = f'{today}T00:00:00Z'
+            today_end = f'{today}T23:59:59.999Z'
+            
+            delete_result = supabase_handler.client.table('dao_pool_snapshots').delete().gte('created_at', today_start).lte('created_at', today_end).execute()
+            print(f"   🗑️ Удалено записей за сегодня ({today}): {len(delete_result.data) if delete_result.data else 0}")
+            print(f"   📊 Исторические данные других дней сохранены")
             
             # Добавляем created_at для каждой записи
             for snapshot in snapshots:
@@ -913,11 +932,282 @@ class DAOPoolsSnapshotGenerator:
                     print(f"   ⚠️ Ошибка сохранения батча {i // batch_size + 1}")
             
             print(f"   ✅ Успешно сохранено {success_count} из {len(snapshots)} записей")
+            print(f"   📈 Режим: Историческая коллекция (одна запись за день)")
             return success_count > 0
             
         except Exception as e:
             print(f"   ❌ Ошибка сохранения в Supabase: {e}")
             return False
+
+    async def fetch_token_ohlcv_data(self, pool_address: str, network: str, client: httpx.AsyncClient) -> Optional[Dict[str, Any]]:
+        """Получить OHLCV данные для расчета исторических изменений цен"""
+        network_map = {
+            'ethereum': 'eth',
+            'base': 'base', 
+            'solana': 'solana'
+        }
+        
+        network_id = network_map.get(network, network)
+        url = f'https://api.geckoterminal.com/api/v2/networks/{network_id}/pools/{pool_address}/ohlcv/day?limit=8'
+        
+        # Retry логика для rate limits
+        max_retries = 3
+        base_delay = 2.0
+        
+        for attempt in range(max_retries):
+            try:
+                response = await client.get(url, timeout=20)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    ohlcv_list = data.get('data', {}).get('attributes', {}).get('ohlcv_list', [])
+                    
+                    if len(ohlcv_list) >= 2:  # Минимум 2 дня данных
+                        return {
+                            'current': ohlcv_list[0],  # Последний день [timestamp, open, high, low, close, volume]
+                            'day_1': ohlcv_list[1] if len(ohlcv_list) > 1 else None,  # 1 день назад
+                            'day_7': ohlcv_list[7] if len(ohlcv_list) > 7 else ohlcv_list[-1],  # 7 дней назад или самый старый
+                            'count': len(ohlcv_list)
+                        }
+                    else:
+                        print(f"   ⚠️ Недостаточно OHLCV данных для {pool_address} ({network}): {len(ohlcv_list)} дней")
+                        return None
+                        
+                elif response.status_code == 429:  # Rate limit
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    if attempt < max_retries - 1:
+                        print(f"   🔄 OHLCV Rate limit для {pool_address}, retry {attempt + 1}/{max_retries} через {delay}s")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        print(f"   ⚠️ OHLCV Rate limit для {pool_address} после {max_retries} попыток")
+                        return None
+                else:
+                    print(f"   ⚠️ OHLCV API error для {pool_address}: {response.status_code}")
+                    return None
+                    
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    print(f"   🔄 OHLCV ошибка для {pool_address}, retry {attempt + 1}/{max_retries} через {delay}s: {e}")
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    print(f"   ❌ Ошибка получения OHLCV для {pool_address}: {e}")
+                    return None
+        
+        return None
+
+    def calculate_price_changes(self, current_price: float, ohlcv_data: Dict[str, Any]) -> Dict[str, float]:
+        """Рассчитать изменения цен на основе OHLCV данных"""
+        changes = {
+            'price_change_24h_percent': None,
+            'price_change_7d_percent': None
+        }
+        
+        try:
+            # 24h изменение: current vs 1 день назад
+            if ohlcv_data.get('day_1'):
+                price_24h_ago = float(ohlcv_data['day_1'][4])  # close price
+                if price_24h_ago > 0:
+                    changes['price_change_24h_percent'] = ((current_price - price_24h_ago) / price_24h_ago) * 100
+            
+            # 7d изменение: current vs 7 дней назад
+            if ohlcv_data.get('day_7'):
+                price_7d_ago = float(ohlcv_data['day_7'][4])  # close price
+                if price_7d_ago > 0:
+                    changes['price_change_7d_percent'] = ((current_price - price_7d_ago) / price_7d_ago) * 100
+            
+            return changes
+            
+        except Exception as e:
+            print(f"   ❌ Ошибка расчета изменений цен: {e}")
+            return changes
+
+    async def save_token_price_history(self, token_symbol: str, network: str, current_price: float, 
+                                     current_fdv: float, ohlcv_data: Dict[str, Any] = None) -> bool:
+        """Сохранить историю цен токена в Supabase"""
+        if not SUPABASE_ENABLED or not supabase_handler or not supabase_handler.is_connected():
+            return False
+        
+        try:
+            # Рассчитываем изменения на основе OHLCV
+            price_changes = self.calculate_price_changes(current_price, ohlcv_data or {})
+            
+            # Извлекаем исторические цены из OHLCV
+            price_24h_ago = None
+            price_7d_ago = None
+            fdv_24h_ago = None
+            fdv_7d_ago = None
+            
+            if ohlcv_data:
+                if ohlcv_data.get('day_1'):
+                    price_24h_ago = float(ohlcv_data['day_1'][4])  # close price
+                    if current_fdv and current_price:
+                        fdv_24h_ago = current_fdv * (price_24h_ago / current_price)
+                
+                if ohlcv_data.get('day_7'):
+                    price_7d_ago = float(ohlcv_data['day_7'][4])  # close price  
+                    if current_fdv and current_price:
+                        fdv_7d_ago = current_fdv * (price_7d_ago / current_price)
+            
+            # Рассчитываем FDV изменения
+            fdv_change_24h = None
+            fdv_change_7d = None
+            
+            if fdv_24h_ago and fdv_24h_ago > 0:
+                fdv_change_24h = ((current_fdv - fdv_24h_ago) / fdv_24h_ago) * 100
+                
+            if fdv_7d_ago and fdv_7d_ago > 0:
+                fdv_change_7d = ((current_fdv - fdv_7d_ago) / fdv_7d_ago) * 100
+            
+            # Формируем данные для сохранения
+            price_history_data = {
+                'token_symbol': token_symbol,
+                'network': network,
+                'price_current': current_price,
+                'fdv_current': current_fdv,
+                'price_24h_ago': price_24h_ago,
+                'price_7d_ago': price_7d_ago,
+                'fdv_24h_ago': fdv_24h_ago,
+                'fdv_7d_ago': fdv_7d_ago,
+                'price_change_24h_percent': price_changes['price_change_24h_percent'],
+                'price_change_7d_percent': price_changes['price_change_7d_percent'],
+                'fdv_change_24h_percent': fdv_change_24h,
+                'fdv_change_7d_percent': fdv_change_7d,
+                'last_updated': datetime.now(timezone.utc).isoformat(),
+                'data_source': 'geckoterminal'
+            }
+            
+            # Сохраняем в Supabase
+            return supabase_handler.save_token_price_history(price_history_data)
+            
+        except Exception as e:
+            print(f"   ❌ Ошибка сохранения истории цен {token_symbol}: {e}")
+            return False
+
+    async def collect_token_price_history(self, all_pool_snapshots: List[Dict[str, Any]], dao_tokens: Dict[str, Dict[str, Any]], client: httpx.AsyncClient):
+        """Собрать историю цен для всех уникальных токенов"""
+        print(f"\n📈 Сбор исторических данных цен токенов...")
+        
+        # Группируем пулы по токенам и сетям
+        tokens_by_network = {}
+        
+        for snapshot in all_pool_snapshots:
+            token_symbol = snapshot.get('token_symbol')
+            network = snapshot.get('network')
+            pool_address = snapshot.get('pool_address')
+            
+            if not token_symbol or not network or not pool_address:
+                continue
+                
+            # Исключаем базовые токены
+            if token_symbol in ['SOL', 'ETH', 'BIO', 'WETH']:
+                continue
+            
+            key = (token_symbol, network)
+            if key not in tokens_by_network:
+                tokens_by_network[key] = {
+                    'token_symbol': token_symbol,
+                    'network': network,
+                    'pools': [],
+                    'best_pool': None,
+                    'max_tvl': 0
+                }
+            
+            # Добавляем пул и отслеживаем лучший (по TVL)
+            pool_info = {
+                'address': pool_address,
+                'tvl': snapshot.get('tvl_usd', 0),
+                'price': snapshot.get('token_price_usd', 0),
+                'fdv': snapshot.get('token_fdv_usd', 0)
+            }
+            
+            tokens_by_network[key]['pools'].append(pool_info)
+            
+            if pool_info['tvl'] > tokens_by_network[key]['max_tvl']:
+                tokens_by_network[key]['max_tvl'] = pool_info['tvl']
+                tokens_by_network[key]['best_pool'] = pool_info
+        
+        # Собираем OHLCV данные для каждого токена
+        success_count = 0
+        total_count = len(tokens_by_network)
+        rate_limit_count = 0  # Счетчик rate limits для адаптивных задержек
+        
+        for i, ((token_symbol, network), token_data) in enumerate(tokens_by_network.items(), 1):
+            best_pool = token_data['best_pool']
+            
+            if not best_pool or best_pool['price'] <= 0:
+                print(f"   ⚠️ {token_symbol} ({network}): нет корректных данных")
+                continue
+            
+            try:
+                # Получаем актуальные данные пула для точной цены
+                pool_address = best_pool['address']
+                network_map = {'ethereum': 'eth', 'base': 'base', 'solana': 'solana'}
+                network_id = network_map.get(network, network)
+                
+                # Запрашиваем актуальную цену из API пула
+                pool_url = f'https://api.geckoterminal.com/api/v2/networks/{network_id}/pools/{pool_address}'
+                pool_response = await client.get(pool_url, timeout=20)
+                
+                current_price = best_pool['price']  # Fallback к цене из snapshot
+                
+                # Используем правильный FDV из dao_tokens (максимальный из всех сетей)
+                current_fdv = dao_tokens.get(token_symbol, {}).get('fdv_usd', 0)
+                
+                if pool_response.status_code == 200:
+                    pool_data = pool_response.json()
+                    attrs = pool_data.get('data', {}).get('attributes', {})
+                    
+                    # Получаем актуальную цену базового токена (CURES в паре BIO/CURES)
+                    api_price = float(attrs.get('base_token_price_usd', 0))
+                    if api_price > 0:
+                        current_price = api_price
+                        print(f"   📊 {token_symbol}: актуальная цена ${current_price:.6f} (было ${best_pool['price']:.6f})")
+                    
+                    # FDV не берем из API пула (неточно), используем уже рассчитанный
+                elif pool_response.status_code == 429:
+                    rate_limit_count += 1
+                    print(f"   ⚠️ {token_symbol}: Rate limit для API пула, используем цену из snapshot")
+                else:
+                    print(f"   ⚠️ {token_symbol}: API пула недоступен ({pool_response.status_code}), используем цену из snapshot")
+                
+                # Получаем OHLCV данные для лучшего пула
+                ohlcv_data = await self.fetch_token_ohlcv_data(
+                    pool_address, 
+                    network, 
+                    client
+                )
+                
+                # Сохраняем историю цен с АКТУАЛЬНОЙ ценой
+                success = await self.save_token_price_history(
+                    token_symbol,
+                    network,
+                    current_price,    # ← ИСПРАВЛЕНО: используем актуальную цену
+                    current_fdv,      # ← ИСПРАВЛЕНО: используем актуальную FDV
+                    ohlcv_data
+                )
+                
+                if success:
+                    success_count += 1
+                
+                # Адаптивная задержка: увеличиваем при частых rate limits
+                base_delay = 1.0
+                if rate_limit_count > 5:  # Много rate limits
+                    delay = base_delay * 3  # Утроенная задержка
+                    print(f"   ⏳ Увеличиваем задержку до {delay}s из-за rate limits ({rate_limit_count})")
+                elif rate_limit_count > 2:  # Умеренные rate limits  
+                    delay = base_delay * 2  # Удвоенная задержка
+                else:
+                    delay = base_delay
+                
+                await asyncio.sleep(delay)
+                
+            except Exception as e:
+                print(f"   ❌ Ошибка обработки {token_symbol} ({network}): {e}")
+        
+        print(f"   ✅ Обработано {success_count} из {total_count} токенов (rate limits: {rate_limit_count})")
 
 async def main():
     """Основная функция"""
@@ -948,6 +1238,13 @@ async def main():
         # Сохраняем в Supabase (если доступен)
         if SUPABASE_ENABLED:
             await generator.save_to_supabase(snapshots)
+            
+            # Получаем актуальные DAO токены для исторических данных
+            dao_tokens = await generator.load_dao_tokens_for_calculations()
+            
+            # Собираем исторические данные цен токенов
+            async with httpx.AsyncClient() as client:
+                await generator.collect_token_price_history(snapshots, dao_tokens, client)
         
         print(f"\n✅ СНАПШОТ ЗАВЕРШЕН")
         print(f"📁 Файл: {csv_file}")
