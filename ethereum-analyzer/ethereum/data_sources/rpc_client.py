@@ -194,12 +194,18 @@ class EthereumRPCClient:
 
 # Фабрика для создания клиента с реальными endpoint'ами
 def create_ethereum_rpc_client(
-    alchemy_api_key: Optional[str] = "0l42UZmHRHWXBYMJ2QFcdEE-Glj20xqn",
-    infura_api_key: Optional[str] = "347bf443bc8f4d468768e41ee26aff27"
+    alchemy_api_key: Optional[str] = None,
+    infura_api_key: Optional[str] = None
 ) -> EthereumRPCClient:
     """
     Создает RPC клиент с реальными API ключами
     """
+    # Получаем API ключи из переменных окружения, если не переданы
+    if alchemy_api_key is None:
+        alchemy_api_key = os.getenv("ALCHEMY_API_KEY", "0l42UZmHRHWXBYMJ2QFcdEE-Glj20xqn")
+    if infura_api_key is None:
+        infura_api_key = os.getenv("INFURA_API_KEY", "347bf443bc8f4d468768e41ee26aff27")
+    
     endpoints = []
 
     if alchemy_api_key:

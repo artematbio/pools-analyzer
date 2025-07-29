@@ -4,6 +4,29 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from decimal import Decimal
 
+def _format_tvl_with_change(pool_tvl: float, pool_address: str, network: str) -> str:
+    """Форматирует TVL с индикатором изменения если оно больше 5%"""
+    # Безопасное преобразование pool_tvl в число
+    try:
+        if isinstance(pool_tvl, str):
+            # Удаляем символы валют и форматирования
+            clean_tvl = pool_tvl.replace('$', '').replace(',', '').replace('N/A', '0')
+            pool_tvl_num = float(clean_tvl)
+        else:
+            pool_tvl_num = float(pool_tvl) if pool_tvl is not None else 0
+    except (ValueError, TypeError):
+        pool_tvl_num = 0
+    
+    if pool_tvl_num <= 0:
+        return "  📊 Pool TVL: N/A"
+    
+    try:
+        from database_handler import supabase_handler
+        tvl_change = supabase_handler.calculate_tvl_change_indicator(pool_tvl, pool_address, network)
+        return f"  📊 Pool TVL: ${pool_tvl_num:,.2f}{tvl_change}"
+    except Exception as e:
+        return f"  📊 Pool TVL: ${pool_tvl_num:,.2f}"
+
 class ReportFormatter:
     """
     Formats analysis reports for Telegram delivery
@@ -554,18 +577,24 @@ Change: {change_sign}${change_amount:,.2f} ({change_percent:+.1f}%)
                     'volume': float(volume.replace(',', ''))
                 })
             
-            # Extract positions details from English format
-            pos_pattern = r'(\d+)\.\s*NFT:\s*([A-Za-z0-9]+).*?Value:\s*\$([0-9,]+\.?\d*).*?Fees:\s*\$([0-9,]+\.?\d*)'
+            # Extract positions details from English format - updated to capture Status
+            pos_pattern = r'(\d+)\.\s*NFT:\s*([A-Za-z0-9]+).*?Value:\s*\$([0-9,]+\.?\d*).*?Fees:\s*\$([0-9,]+\.?\d*).*?Status:\s*([✅❌])\s*(.*?)(?=\n|$)'
             pos_matches = re.findall(pos_pattern, content, re.DOTALL)
             
-            for pos_num, nft_id, value, yield_amount in pos_matches:
+            for pos_num, nft_id, value, yield_amount, status_emoji, status_text in pos_matches:
                 yield_val = float(yield_amount.replace(',', ''))
+                
+                # Определяем in_range статус из emoji
+                in_range = status_emoji == "✅"
                 
                 pool_data['positions'].append({
                     'number': int(pos_num),
                     'nft_id': nft_id,
                     'value': float(value.replace(',', '')),
-                    'yield': yield_val
+                    'yield': yield_val,
+                    'in_range': in_range,
+                    'status_emoji': status_emoji,
+                    'status_text': status_text.strip()
                 })
             
             return pool_data
@@ -645,6 +674,384 @@ Change: {change_sign}${change_amount:,.2f} ({change_percent:+.1f}%)
         except Exception as e:
             print(f"Error parsing Russian pool section: {e}")
             return None
+
+    def format_multichain_report(self, multichain_data: Dict[str, Any]) -> List[str]:
+        """
+        Форматирует мульти-чейн отчет для Telegram
+        Включает данные Solana, Ethereum и Base
+        
+        Args:
+            multichain_data: {
+                'solana': solana_report_content,
+                'ethereum': ethereum_positions_list, 
+                'base': base_positions_list,
+                'summary': total_stats
+            }
+        """
+        try:
+            report_parts = []
+            
+            # Заголовок
+            current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+            header = [
+                "🌐 MULTI-CHAIN PORTFOLIO REPORT",
+                "=" * 40,
+                "",
+                f"📅 Generated: {current_time}",
+                f"🔗 Networks: Solana • Ethereum • Base",
+                ""
+            ]
+            
+            # Общая статистика
+            summary = multichain_data.get('summary', {})
+            total_value = summary.get('total_value_usd', 0)
+            total_positions = summary.get('total_positions', 0)
+            networks_count = summary.get('networks_active', 0)
+            
+            summary_section = [
+                "📊 PORTFOLIO SUMMARY:",
+                f"💰 Total Value: ${total_value:,.2f}",
+                f"📍 Total Positions: {total_positions}",
+                f"🌐 Active Networks: {networks_count}",
+                "",
+                "-" * 40,
+                ""
+            ]
+            
+            # Объединяем заголовок и статистику
+            main_report = header + summary_section
+            
+            # === SOLANA SECTION ===
+            solana_data = multichain_data.get('solana')
+            if solana_data:
+                main_report.extend([
+                    "🟣 SOLANA POOLS (Raydium)",
+                    "=" * 30,
+                    ""
+                ])
+                
+                # Форматируем Solana отчет (используем существующий метод)
+                if isinstance(solana_data, str):
+                    # Если это текстовый отчет, парсим его
+                    solana_parsed = self._parse_report_content(solana_data)
+                    if solana_parsed:
+                        solana_formatted = self._format_solana_section(solana_parsed)
+                        main_report.extend(solana_formatted)
+                elif isinstance(solana_data, dict):
+                    # Если уже структурированные данные
+                    solana_formatted = self._format_solana_section(solana_data)
+                    main_report.extend(solana_formatted)
+                
+                main_report.extend(["", "-" * 30, ""])
+            
+            # === ETHEREUM SECTION ===
+            ethereum_positions = multichain_data.get('ethereum', [])
+            if ethereum_positions:
+                ethereum_section = self._format_ethereum_section(ethereum_positions)
+                main_report.extend(ethereum_section)
+                main_report.extend(["", "-" * 30, ""])
+            
+            # === BASE SECTION ===
+            base_positions = multichain_data.get('base', [])
+            if base_positions:
+                base_section = self._format_base_section(base_positions)
+                main_report.extend(base_section)
+                main_report.extend(["", "-" * 30, ""])
+            
+            # === FOOTER ===
+            footer = [
+                "⏰ Next automated update in 12h"
+            ]
+            
+            main_report.extend(footer)
+            
+            # Объединяем в строку и разбиваем на части
+            full_report = "\n".join(main_report)
+            report_parts = self._split_message(full_report)
+            
+            return report_parts
+            
+        except Exception as e:
+            return [f"❌ Error formatting multi-chain report: {str(e)}"]
+    
+    def _format_solana_section(self, solana_data: Dict) -> List[str]:
+        """Форматирует секцию Solana для мульти-чейн отчета"""
+        section = []
+        
+        try:
+            pools = solana_data.get('pools', [])
+            
+            if not pools:
+                return ["No Solana positions found", ""]
+            
+            # Суммарная статистика Solana
+            total_solana_value = sum(pool.get('positions_value', 0) for pool in pools)
+            total_solana_positions = sum(pool.get('positions_count', 0) for pool in pools)
+            total_solana_yield = sum(pool.get('pending_yield', 0) for pool in pools)
+            
+            section.extend([
+                f"💰 Solana Positions: ${total_solana_value:,.2f}",
+                f"📍 Positions: {total_solana_positions}",
+                f"🎁 Pending Yield: ${total_solana_yield:,.2f}",
+                ""
+            ])
+            
+            # Все пулы Solana с деталями позиций
+            sorted_pools = sorted(pools, key=lambda x: x.get('positions_value', 0), reverse=True)
+            
+            section.append("🏊 POOLS:")
+            for pool in sorted_pools:
+                pool_name = pool.get('name', 'Unknown')
+                pool_value = pool.get('positions_value', 0)
+                pool_count = pool.get('positions_count', 0)
+                pool_tvl = pool.get('tvl', 0)
+                pool_yield = pool.get('pending_yield', 0)
+                
+                # Заголовок пула с TVL
+                section.append(f"• {pool_name}")
+                # Для Solana пулов используем ID пула как адрес
+                pool_address = pool.get('id', '')
+                section.append(_format_tvl_with_change(pool_tvl, pool_address, "solana"))
+                section.append(f"  💰 Our positions: ${pool_value:,.2f} ({pool_count} pos)")
+                section.append(f"  🎁 Yield: ${pool_yield:,.2f}")
+                
+                # Детали позиций
+                positions = pool.get('positions', [])
+                if positions:
+                    section.append("  📍 Positions:")
+                    for pos in positions:
+                        # Пробуем разные поля для значения позиции
+                        pos_value = pos.get('position_value_usd', pos.get('position_value', pos.get('value', 0)))
+                        pos_yield = pos.get('fees_usd', pos.get('yield', 0))
+                        nft_id = pos.get('position_mint', pos.get('nft_id', 'Unknown'))
+                        
+                        # Определяем статус in_range из данных позиции
+                        in_range_status = "in range"  # Default для Solana позиций
+                        range_emoji = "✅"
+                        
+                        # Если есть поле in_range в данных позиции
+                        if 'in_range' in pos:
+                            in_range = pos.get('in_range', True)
+                            if in_range:
+                                range_emoji = "✅"
+                                in_range_status = "in range"
+                            else:
+                                range_emoji = "❌"
+                                in_range_status = "out of range"
+                        
+                        # Показываем короткий ID позиции
+                        short_id = nft_id[:8] + "..." if len(nft_id) > 8 else nft_id
+                        section.append(f"    • ${pos_value:,.2f} • ${pos_yield:,.2f} fees • {range_emoji} {in_range_status} • {short_id}")
+                
+                section.append("")
+            
+        except Exception as e:
+            section.append(f"Error formatting Solana: {e}")
+        
+        return section
+    
+    def _format_ethereum_section(self, ethereum_positions: List[Dict]) -> List[str]:
+        """Форматирует секцию Ethereum для мульти-чейн отчета"""
+        section = [
+            "⚡ ETHEREUM POOLS (Uniswap v3)",
+            "=" * 30,
+            ""
+        ]
+        
+        try:
+            if not ethereum_positions:
+                section.extend(["No Ethereum positions found", ""])
+                return section
+            
+            # Группируем позиции по пулам
+            pools_data = {}
+            total_eth_value = 0
+            # total_eth_fees = 0  # УБРАНО - не показываем fees
+            in_range_count = 0
+            
+            for position in ethereum_positions:
+                pool_name = position.get('pool_name', 'Unknown Pool')
+                value_usd = float(position.get('total_value_usd', 0))
+                # fees_usd = float(position.get('unclaimed_fees_usd', 0))  # УБРАНО
+                in_range = position.get('in_range', False)
+                
+                total_eth_value += value_usd
+                # total_eth_fees += fees_usd  # УБРАНО
+                if in_range:
+                    in_range_count += 1
+                
+                if pool_name not in pools_data:
+                    pools_data[pool_name] = {
+                        'positions': [],
+                        'total_value': 0,
+                        # 'total_fees': 0,  # УБРАНО
+                        'in_range': 0,
+                        'out_range': 0
+                    }
+                
+                pools_data[pool_name]['positions'].append(position)
+                pools_data[pool_name]['total_value'] += value_usd
+                # pools_data[pool_name]['total_fees'] += fees_usd  # УБРАНО
+                
+                if in_range:
+                    pools_data[pool_name]['in_range'] += 1
+                else:
+                    pools_data[pool_name]['out_range'] += 1
+            
+            # Статистика Ethereum
+            section.extend([
+                f"💰 Ethereum Positions: ${total_eth_value:,.2f}",
+                f"📍 Positions: {len(ethereum_positions)}",
+                # f"🎁 Unclaimed Fees: ${total_eth_fees:,.2f}",  # УБРАНО - не показываем fees
+                f"✅ In Range: {in_range_count}/{len(ethereum_positions)}",
+                ""
+            ])
+            
+            # Пулы Ethereum
+            sorted_pools = sorted(pools_data.items(), key=lambda x: x[1]['total_value'], reverse=True)
+            
+            section.append("🏊 POOLS:")
+            for pool_name, pool_data in sorted_pools:
+                pool_value = pool_data['total_value']
+                pool_count = len(pool_data['positions'])
+                # pool_fees = pool_data['total_fees']  # УБРАНО
+                in_range = pool_data['in_range']
+                out_range = pool_data['out_range']
+                
+                section.append(f"• {pool_name}")
+                
+                # Попытка извлечь TVL из первой позиции пула
+                pool_tvl = 0
+                pool_address = ""
+                if pool_data['positions']:
+                    first_pos = pool_data['positions'][0]
+                    pool_tvl = first_pos.get('pool_tvl_usd', 0)
+                    pool_address = first_pos.get("pool_address", "")
+                
+                section.append(_format_tvl_with_change(pool_tvl, pool_address, "ethereum"))                
+                section.append(f"  💰 Our positions: ${pool_value:,.2f} ({pool_count} pos)")
+                # section.append(f"  🎁 Fees: ${pool_fees:,.2f}")  # УБРАНО - не показываем fees
+                
+                # Детали позиций
+                section.append("  📍 Positions:")
+                for position in pool_data['positions']:
+                    pos_value = position.get('total_value_usd', 0)
+                    # pos_fees = position.get('unclaimed_fees_usd', 0)  # УБРАНО
+                    pos_id = position.get('token_id', position.get('position_id', 'Unknown'))
+                    in_range_status = position.get('in_range', False)
+                    range_emoji = "✅" if in_range_status else "❌"
+                    range_text = "in range" if in_range_status else "out of range"
+                    
+                    # Убираем fees из строки позиции
+                    section.append(f"    • ${pos_value:,.2f} • {range_emoji} {range_text} • #{pos_id}")
+                
+                section.append("")
+            
+        except Exception as e:
+            section.append(f"Error formatting Ethereum: {e}")
+        
+        return section
+    
+    def _format_base_section(self, base_positions: List[Dict]) -> List[str]:
+        """Форматирует секцию Base для мульти-чейн отчета"""
+        section = [
+            "🔵 BASE POOLS (Uniswap v3)",
+            "=" * 30,
+            ""
+        ]
+        
+        try:
+            if not base_positions:
+                section.extend(["No Base positions found", ""])
+                return section
+            
+            # Группируем позиции по пулам
+            pools_data = {}
+            total_base_value = 0
+            # total_base_fees = 0  # УБРАНО - не показываем fees
+            in_range_count = 0
+            
+            for position in base_positions:
+                pool_name = position.get('pool_name', 'Unknown Pool')
+                value_usd = float(position.get('total_value_usd', 0))
+                # fees_usd = float(position.get('unclaimed_fees_usd', 0))  # УБРАНО
+                in_range = position.get('in_range', False)
+                
+                total_base_value += value_usd
+                # total_base_fees += fees_usd  # УБРАНО
+                if in_range:
+                    in_range_count += 1
+                
+                if pool_name not in pools_data:
+                    pools_data[pool_name] = {
+                        'positions': [],
+                        'total_value': 0,
+                        # 'total_fees': 0,  # УБРАНО
+                        'in_range': 0,
+                        'out_range': 0
+                    }
+                
+                pools_data[pool_name]['positions'].append(position)
+                pools_data[pool_name]['total_value'] += value_usd
+                # pools_data[pool_name]['total_fees'] += fees_usd  # УБРАНО
+                
+                if in_range:
+                    pools_data[pool_name]['in_range'] += 1
+                else:
+                    pools_data[pool_name]['out_range'] += 1
+            
+            # Статистика Base
+            section.extend([
+                f"💰 Base Positions: ${total_base_value:,.2f}",
+                f"📍 Positions: {len(base_positions)}",
+                # f"🎁 Unclaimed Fees: ${total_base_fees:,.2f}",  # УБРАНО - не показываем fees
+                f"✅ In Range: {in_range_count}/{len(base_positions)}",
+                ""
+            ])
+            
+            # Пулы Base
+            sorted_pools = sorted(pools_data.items(), key=lambda x: x[1]['total_value'], reverse=True)
+            
+            section.append("🏊 POOLS:")
+            for pool_name, pool_data in sorted_pools:
+                pool_value = pool_data['total_value']
+                pool_count = len(pool_data['positions'])
+                # pool_fees = pool_data['total_fees']  # УБРАНО
+                in_range = pool_data['in_range']
+                out_range = pool_data['out_range']
+                
+                section.append(f"• {pool_name}")
+                
+                # Попытка извлечь TVL из первой позиции пула
+                pool_tvl = 0
+                pool_address = ""
+                if pool_data['positions']:
+                    first_pos = pool_data['positions'][0]
+                    pool_tvl = first_pos.get('pool_tvl_usd', 0)
+                    pool_address = first_pos.get("pool_address", "")
+                
+                section.append(_format_tvl_with_change(pool_tvl, pool_address, "base"))                
+                section.append(f"  💰 Our positions: ${pool_value:,.2f} ({pool_count} pos)")
+                # section.append(f"  🎁 Fees: ${pool_fees:,.2f}") # УБРАНО - не показываем fees
+                
+                # Детали позиций
+                section.append("  📍 Positions:")
+                for position in pool_data['positions']:
+                    pos_value = position.get('total_value_usd', 0)
+                    # pos_fees = position.get('unclaimed_fees_usd', 0) # УБРАНО
+                    pos_id = position.get('token_id', position.get('position_id', 'Unknown'))
+                    in_range_status = position.get('in_range', False)
+                    range_emoji = "✅" if in_range_status else "❌"
+                    range_text = "in range" if in_range_status else "out of range"
+                    
+                    section.append(f"    • ${pos_value:,.2f} • {range_emoji} {range_text} • #{pos_id}")
+                
+                section.append("")
+            
+        except Exception as e:
+            section.append(f"Error formatting Base: {e}")
+        
+        return section
 
 # Utility functions for quick formatting
 def format_number(value: float, precision: int = 2) -> str:

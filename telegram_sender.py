@@ -50,6 +50,7 @@ class TelegramSender:
         """Lazy initialization of bot to avoid conflicts"""
         if self._bot is None and self.bot_token and Bot:
             try:
+                # Create bot without deprecated proxies parameter
                 self._bot = Bot(token=self.bot_token)
                 logging.info("✅ Telegram bot initialized successfully")
             except Exception as e:

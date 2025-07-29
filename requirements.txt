@@ -9,7 +9,7 @@ aiohttp-cors>=0.7.0
 httpx>=0.26.0
 
 # Telegram Bot
-python-telegram-bot>=20.7
+python-telegram-bot>=21.0
 
 # Environment and configuration
 python-dotenv>=1.0.0
@@ -40,4 +40,12 @@ typing-extensions>=4.9.0
 
 # Supabase integration
 supabase>=2.0.0
-psycopg2-binary>=2.9.0 
+psycopg2-binary>=2.9.0
+
+# Multi-chain analysis dependencies
+web3>=6.15.0
+eth-typing>=3.5.0
+eth-utils>=2.3.0
+
+# Decimal precision for financial calculations
+decimal>=1.0.0 

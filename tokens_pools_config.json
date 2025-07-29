@@ -1,0 +1,606 @@
+{
+  "tokens": {
+    "ethereum": [
+      {
+        "symbol": "BIO",
+        "name": "Bio Protocol",
+        "address": "0xcb1592591996765ec0efc1f92599a19767ee5ffa",
+        "decimals": 18,
+        "coingecko_id": "bio-protocol"
+      },
+      {
+        "symbol": "VITA",
+        "name": "VitaDAO",
+        "address": "0x81f8f0bb1cb2a06649e51913a151f0e7ef6fa321",
+        "decimals": 18,
+        "coingecko_id": "vitadao"
+      },
+      {
+        "symbol": "WETH",
+        "name": "Wrapped Ether",
+        "address": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+        "decimals": 18,
+        "coingecko_id": "weth"
+      },
+      {
+        "symbol": "HAIR",
+        "name": "HairDAO",
+        "address": "0x9ce115f0341ae5dabc8b477b74e83db2018a6f42",
+        "decimals": 18,
+        "coingecko_id": "hairdao"
+      },
+      {
+        "symbol": "NEURON",
+        "name": "Cerebrum DAO Token",
+        "address": "0xab814ce69e15f6b9660a3b184c0b0c97b9394a6b",
+        "decimals": 18,
+        "coingecko_id": "cerebrum-dao"
+      },
+      {
+        "symbol": "ATH",
+        "name": "AthenaDAO",
+        "address": "0xa4ffdf3208f46898ce063e25c1c43056fa754739",
+        "decimals": 18,
+        "coingecko_id": "athenadao-token"
+      },
+      {
+        "symbol": "GROW",
+        "name": "ValleyDAO",
+        "address": "0x761A3557184cbC07b7493da0661c41177b2f97fA",
+        "decimals": 18,
+        "coingecko_id": "valleydao"
+      },
+      {
+        "symbol": "CRYO",
+        "name": "CryoDAO",
+        "address": "0xf4308b0263723b121056938c2172868E408079D0",
+        "decimals": 18,
+        "coingecko_id": "cryodao"
+      },
+      {
+        "symbol": "QBIO",
+        "name": "Quantum Biology DAO",
+        "address": "0x3E6A1b21bd267677Fa49BE6425aEbe2fc0f89bDE",
+        "decimals": 18,
+        "coingecko_id": "quantum-biology-dao"
+      },
+      {
+        "symbol": "PSY",
+        "name": "PsyDAO",
+        "address": "0x2196B84EaCe74867b73fb003AfF93C11FcE1D47A",
+        "decimals": 18,
+        "coingecko_id": "psydao"
+      }
+    ],
+    "base": [
+      {
+        "symbol": "BIO",
+        "name": "Bio Protocol",
+        "address": "0x226a2fa2556c48245e57cd1cba4c6c9e67077dd2",
+        "decimals": 18,
+        "coingecko_id": "bio-protocol"
+      },
+      {
+        "symbol": "WETH",
+        "name": "Wrapped Ether",
+        "address": "0x4200000000000000000000000000000000000006",
+        "decimals": 18,
+        "coingecko_id": "weth"
+      },
+      {
+        "symbol": "VITA",
+        "name": "VitaDAO",
+        "address": "0x490a4B510d0Ea9f835D2dF29Eb73b4FcA5071937",
+        "decimals": 18,
+        "coingecko_id": "vitadao"
+      },
+      {
+        "symbol": "HAIR",
+        "name": "HairDAO",
+        "address": "0x3a38dde9824e18cc4c0a147824f95bf5d608f0b3",
+        "decimals": 18,
+        "coingecko_id": "hairdao"
+      },
+      {
+        "symbol": "ATH",
+        "name": "AthenaDAO",
+        "address": "0x58d75a1c4477914f9a98a8708feaed1dbe40b8a3",
+        "decimals": 18,
+        "coingecko_id": "athenadao-token"
+      },
+      {
+        "symbol": "GROW",
+        "name": "ValleyDAO",
+        "address": "0x321725ee44CB4bfA544CF45a5A585b925d30A58C",
+        "decimals": 18,
+        "coingecko_id": "valleydao"
+      },
+      {
+        "symbol": "NEURON",
+        "name": "Cerebrum DAO Token",
+        "address": "0x3568c7a4f7545805e379c264303239781b4e9a79",
+        "decimals": 18,
+        "coingecko_id": "cerebrum-dao"
+      },
+      {
+        "symbol": "CRYO",
+        "name": "CryoDAO",
+        "address": "0x1f4446fAAAed23090f324f051C3F8c5ce5aD1c36",
+        "decimals": 18,
+        "coingecko_id": "cryodao"
+      },
+      {
+        "symbol": "PSY",
+        "name": "PsyDAO",
+        "address": "0x85d0e1bde4e71aede97e0f0412c6e4b3d1e59a97",
+        "decimals": 18,
+        "coingecko_id": "psydao"
+      }
+    ],
+    "solana": [
+      {
+        "symbol": "BIO",
+        "name": "Bio Protocol",
+        "address": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "decimals": 9,
+        "coingecko_id": "bio-protocol"
+      },
+      {
+        "symbol": "SOL",
+        "name": "Solana",
+        "address": "So11111111111111111111111111111111111111112",
+        "decimals": 9,
+        "coingecko_id": "solana"
+      },
+      {
+        "symbol": "SPINE",
+        "name": "SpineDAO",
+        "address": "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR",
+        "decimals": 9,
+        "coingecko_id": "spinedao-token"
+      },
+      {
+        "symbol": "CURES",
+        "name": "Cures Token",
+        "address": "9qU3LmwKJKT2DJeGPihyTP2jc6pC7ij3hPFeyJVzuksN",
+        "decimals": 6,
+        "coingecko_id": "curetopia"
+      },
+      {
+        "symbol": "QBIO",
+        "name": "Quantum Biology DAO",
+        "address": "qbioCGDnUBGX5qcK1Fc4zg19GaQEPmxHFMPMZQm4LZ8",
+        "decimals": 9,
+        "coingecko_id": "quantum-biology-dao"
+      },
+      {
+        "symbol": "RIF",
+        "name": "Rifampicin",
+        "address": "GJtJuWD9qYcCkrwMBmtY1tpapV1sKfB2zUv9Q4aqpump",
+        "decimals": 6,
+        "coingecko_id": "rifampicin"
+      },
+      {
+        "symbol": "URO",
+        "name": "Urolithin A",
+        "address": "FvgqHMfL9yn39V79huDPy3YUNDoYJpuLWng2JfmQpump",
+        "decimals": 6,
+        "coingecko_id": "urolithin-a"
+      },
+      {
+        "symbol": "GROW",
+        "name": "ValleyDAO",
+        "address": "growFDf9teg9gwVTTY3DgpPXU31qBrnbSQCqtY2vkR8",
+        "decimals": 9,
+        "coingecko_id": "valleydao"
+      },
+      {
+        "symbol": "NEURON",
+        "name": "Cerebrum DAO Token",
+        "address": "neuRodi6Saw2cwDpud7FyAcjzqPBJDtr3fDTXE2Fu4j",
+        "decimals": 9,
+        "coingecko_id": "cerebrum-dao"
+      },
+      {
+        "symbol": "MYCO",
+        "name": "Mycelium DAO",
+        "address": "EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3",
+        "decimals": 6,
+        "coingecko_id": "mycelium-dao"
+      }
+    ]
+  },
+  "pools": {
+    "ethereum": [
+
+      {
+        "name": "BIO/WETH",
+        "address": "0x08a5a1e2671839dadc25e2e20f9206fd33c88092",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0xcb1592591996765ec0efc1f92599a19767ee5ffa",
+        "token1": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+      },
+      {
+        "name": "VITA/WETH",
+        "address": "0xcbcc3cbad991ec59204be2963b4a87951e4d292b",
+        "protocol": "uniswap_v3",
+        "fee_tier": 10000,
+        "token0": "0x81f8f0bb1cb2a06649e51913a151f0e7ef6fa321",
+        "token1": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+      },
+      {
+        "name": "VITA/BIO",
+        "address": "0x2dc8fbafc10da100f2f12807b93cbb3e5ff7e6b0",
+        "protocol": "uniswap_v3",
+        "fee_tier": 10000,
+        "token0": "0x81f8f0bb1cb2a06649e51913a151f0e7ef6fa321",
+        "token1": "0xcb1592591996765ec0efc1f92599a19767ee5ffa"
+      },
+      {
+        "name": "NEURON/BIO",
+        "address": "0x4384273ccd97a503448ca46b3fd1da31689eb2ef",
+        "protocol": "uniswap_v3",
+        "fee_tier": 10000,
+        "token0": "0xab814ce69e15f6b9660a3b184c0b0c97b9394a6b",
+        "token1": "0xcb1592591996765ec0efc1f92599a19767ee5ffa"
+      },
+      {
+        "name": "HAIR/WETH",
+        "address": "0x94dd312f6cb52c870aacfeeb8bf5e4e28f6952ff",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x9ce115f0341ae5dabc8b477b74e83db2018a6f42",
+        "token1": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+      },
+      {
+        "name": "GROW/WETH",
+        "address": "0x61847189477150832d658d8f34f84c603ac269af",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x761A3557184cbC07b7493da0661c41177b2f97fA",
+        "token1": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+      },
+      {
+        "name": "BIO/ETH",
+        "address": "0xc8c4ec62ee9aed213a68d3c49b2b64b630a26873c5b003f40db4d357834bfd96",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0xcb1592591996765ec0efc1f92599a19767ee5ffa",
+        "token1": "UNKNOWN_ETH_ethereum"
+      },
+      {
+        "name": "ATH/WETH",
+        "address": "0x8071df1889d60a1c6329ef79976fb1f2e50599af",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0xa4ffdf3208f46898ce063e25c1c43056fa754739",
+        "token1": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+      },
+      {
+        "name": "QBIO/WETH",
+        "address": "0x4830570554606cbc37478ab773fde991261fd99c",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x3E6A1b21bd267677Fa49BE6425aEbe2fc0f89bDE",
+        "token1": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+      },
+      {
+        "name": "VITA-FAST/VITA",
+        "address": "0x9263a956c4186d0527c317cedbea6f8925297db0",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "UNKNOWN_VITA-FAST_ethereum",
+        "token1": "0x81f8f0bb1cb2a06649e51913a151f0e7ef6fa321"
+      },
+      {
+        "name": "CRYO/WETH",
+        "address": "0x6fcee8a45384aec61fdee3fbdd871a338d8ea44c",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0xf4308b0263723b121056938c2172868E408079D0",
+        "token1": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+      },
+      {
+        "name": "NEURON/WETH",
+        "address": "0x840faba6f38e28e1494f186990f0f17cb2c7bcac",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0xab814ce69e15f6b9660a3b184c0b0c97b9394a6b",
+        "token1": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+      },
+      {
+        "name": "PSY/WETH",
+        "address": "0xedc5d54b823873f3bb143a06a5ef2d003c29a933",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x2196B84EaCe74867b73fb003AfF93C11FcE1D47A",
+        "token1": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+      },
+      {
+        "name": "PSY/BIO",
+        "address": "0xf612b59da31ffddf3a99e7773abd35ef6a031578f0e7c93e0ee5386e66969b09",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x2196B84EaCe74867b73fb003AfF93C11FcE1D47A",
+        "token1": "0xcb1592591996765ec0efc1f92599a19767ee5ffa"
+      },
+      {
+        "name": "BIO/CRYO",
+        "address": "0x6f4fe0a4033000101c460a93b23c0694b36972c40c9e11d04f7cf8e0aab9c070",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0xcb1592591996765ec0efc1f92599a19767ee5ffa",
+        "token1": "0xf4308b0263723b121056938c2172868E408079D0"
+      },
+      {
+        "name": "QBIO/BIO",
+        "address": "0xbaf08f27fcef85bdc00ff005c08981d06f01e35aa5c5cb4631a0bcb2484ae3e3",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x3E6A1b21bd267677Fa49BE6425aEbe2fc0f89bDE",
+        "token1": "0xcb1592591996765ec0efc1f92599a19767ee5ffa"
+      },
+      {
+        "name": "GROW/BIO",
+        "address": "0xc89e358a3ebac6720e7c404623a45015af7b29aaf0a99d5aab5557a2766d9641",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x761A3557184cbC07b7493da0661c41177b2f97fA",
+        "token1": "0xcb1592591996765ec0efc1f92599a19767ee5ffa"
+      },
+      {
+        "name": "VITA/CRYO",
+        "address": "0x31a6654bde58bce2b437396ba71a0e545198cace",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x81f8f0bb1cb2a06649e51913a151f0e7ef6fa321",
+        "token1": "0xf4308b0263723b121056938c2172868E408079D0"
+      },
+      {
+        "name": "VITA/WETH",
+        "address": "0x350196326aeaa9b98f1903fb5e8fc2686f85318c",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x81f8f0bb1cb2a06649e51913a151f0e7ef6fa321",
+        "token1": "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+      },
+      {
+        "name": "VITARNA/VITA",
+        "address": "0x6aeb5a2974902717ee01d33b6f999edbc4ab4c7a",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "UNKNOWN_VITARNA_ethereum",
+        "token1": "0x81f8f0bb1cb2a06649e51913a151f0e7ef6fa321"
+      }
+    ],
+    "base": [
+      {
+        "name": "BIO/WETH",
+        "address": "0x052e77018bfb98dc6373c37d757bb1d3fad09ec5",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x226a2fa2556c48245e57cd1cba4c6c9e67077dd2",
+        "token1": "0x4200000000000000000000000000000000000006"
+      },
+      {
+        "name": "VITA/WETH",
+        "address": "0x2424567f396dda9a2ee9337d54606c65d2bfb6cb",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x490a4B510d0Ea9f835D2dF29Eb73b4FcA5071937",
+        "token1": "0x4200000000000000000000000000000000000006"
+      },
+      {
+        "name": "HAIR/POO",
+        "address": "0x437ea7cbd5b63f264bf94efdcc4d091d4698813b",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x3a38dde9824e18cc4c0a147824f95bf5d608f0b3",
+        "token1": "UNKNOWN_POO_base"
+      },
+      {
+        "name": "ATH/WETH",
+        "address": "0x7c36577aec1d99d9b872b7075bd86c8f1334ecf2",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x58d75a1c4477914f9a98a8708feaed1dbe40b8a3",
+        "token1": "0x4200000000000000000000000000000000000006"
+      },
+      {
+        "name": "CRYO/WETH",
+        "address": "0x65ee5a0ee82027d054efeb31a1f7079c37c5dbd8",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x1f4446fAAAed23090f324f051C3F8c5ce5aD1c36",
+        "token1": "0x4200000000000000000000000000000000000006"
+      },
+      {
+        "name": "NEURON/WETH",
+        "address": "0x77e0c0e305453365ac024943b68dd26ca48c8871",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x3568c7a4f7545805e379c264303239781b4e9a79",
+        "token1": "0x4200000000000000000000000000000000000006"
+      },
+      {
+        "name": "PSY/WETH",
+        "address": "0x7e0eb4921cb1aa2fd2ee6d994b8741ad25873368",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x85d0e1bde4e71aede97e0f0412c6e4b3d1e59a97",
+        "token1": "0x4200000000000000000000000000000000000006"
+      },
+      {
+        "name": "VITA/AB4AD",
+        "address": "0x7e52f10c7503bd29dcd3ea237453b271ec7b6366",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x490a4B510d0Ea9f835D2dF29Eb73b4FcA5071937",
+        "token1": "UNKNOWN_AB4AD_base"
+      },
+      {
+        "name": "HAIR/WETH",
+        "address": "0x74d47af0885f87b678c76990966cc49b0ec6d5c3",
+        "protocol": "uniswap_v3",
+        "fee_tier": 3000,
+        "token0": "0x3a38dde9824e18cc4c0a147824f95bf5d608f0b3",
+        "token1": "0x4200000000000000000000000000000000000006"
+      }
+    ],
+    "solana": [
+      {
+        "name": "BIO/CURES",
+        "address": "DojNuRx9Ncky7BbWRfsLmJg2oYb8qsYD344XufUHAjbJ",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "token1": "9qU3LmwKJKT2DJeGPihyTP2jc6pC7ij3hPFeyJVzuksN"
+      },
+      {
+        "name": "SOL/BIO",
+        "address": "4LuGwek6Jv4xpGvsQwZXonmLuRhrpHtmKVs95bN9EkTm",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "So11111111111111111111111111111111111111112",
+        "token1": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ"
+      },
+      {
+        "name": "BIO/SPINE",
+        "address": "5LZawn1Pqv8Jd96nq5GPVZAz9a7jZWFD66A5JvUodRNL",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "token1": "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR"
+      },
+      {
+        "name": "SOL/SPINE",
+        "address": "CkDV9Eko3KijeRpadFyJTSi4fiBbCT9d3Vdp9JhsUioM",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "So11111111111111111111111111111111111111112",
+        "token1": "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR"
+      },
+      {
+        "name": "BIO/QBIO",
+        "address": "DCNWwwSHSLYRR9WbBunkRaPEC73ba68yQNhytap3qRJZ",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "token1": "qbioCGDnUBGX5qcK1Fc4zg19GaQEPmxHFMPMZQm4LZ8"
+      },
+      {
+        "name": "BIO/RIF",
+        "address": "HMWSMe7PVmwmiRccbTW14BkKj54x3XESgBgqAshTutaA",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "token1": "GJtJuWD9qYcCkrwMBmtY1tpapV1sKfB2zUv9Q4aqpump"
+      },
+      {
+        "name": "BIO/URO",
+        "address": "FErC1cX1tH2mGRpzfXpeAiNMe6Zu2zpQSeqteDAm9W49",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "token1": "FvgqHMfL9yn39V79huDPy3YUNDoYJpuLWng2JfmQpump"
+      },
+      {
+        "name": "BIO/GROW",
+        "address": "3K2NaZx1KAyJqsdUkU9qgtk1qJEs6wbygjLxJvvXrLhq",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "token1": "growFDf9teg9gwVTTY3DgpPXU31qBrnbSQCqtY2vkR8"
+      },
+      {
+        "name": "BIO/NEURON",
+        "address": "AojR1PokyjRAQsVYgftnWn6T5cs9KPiZG7oEKFkhBrkS",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "token1": "neuRodi6Saw2cwDpud7FyAcjzqPBJDtr3fDTXE2Fu4j"
+      },
+      {
+        "name": "$RIF/SOL",
+        "address": "A8iNixG97AjK5kCXTdi5ooDg2DrKeEBpnW2Ghchpe4j1",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "UNKNOWN_$RIF_solana",
+        "token1": "So11111111111111111111111111111111111111112"
+      },
+      {
+        "name": "$URO/SOL",
+        "address": "3hsdbMFsiCh3YCsXoFjgx4TVpxECsUE9nRMgvaoyveQT",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "UNKNOWN_$URO_solana",
+        "token1": "So11111111111111111111111111111111111111112"
+      },
+      {
+        "name": "CURES/SOL",
+        "address": "64n1xiethWZQZAUfKuUQCTJFrGbuDeCLLnj4wD4RqNoN",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "9qU3LmwKJKT2DJeGPihyTP2jc6pC7ij3hPFeyJVzuksN",
+        "token1": "So11111111111111111111111111111111111111112"
+      },
+      {
+        "name": "MYCO/SOL",
+        "address": "FgCQoL7tcC1nkNazV5onEgWbm9UJ9nbzqo9rZCYm6Yi4",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3",
+        "token1": "So11111111111111111111111111111111111111112"
+      },
+      {
+        "name": "BIO/SPINE",
+        "address": "2J6soXrYA2wgBNYfAk5cBddF2oGPTZtqwdFVctoA17SK",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "token1": "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR"
+      },
+      {
+        "name": "QBIO/SOL",
+        "address": "C5UBqyEWGKNpt8mDvMYv1w9drPiBh4y18RvYFWrV5Hbp",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "qbioCGDnUBGX5qcK1Fc4zg19GaQEPmxHFMPMZQm4LZ8",
+        "token1": "So11111111111111111111111111111111111111112"
+      },
+      {
+        "name": "SPINE/USDC",
+        "address": "Dg1AeagirgYwCEeDYdxDtd6SUk4Z4rarqkNLzPaijDvY",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR",
+        "token1": "UNKNOWN_USDC_solana"
+      },
+      {
+        "name": "GROW/SOL",
+        "address": "ACLmC13vYppR97cjfFyksBBRj6XqYP4Hpo4pqBmRXUT8",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "growFDf9teg9gwVTTY3DgpPXU31qBrnbSQCqtY2vkR8",
+        "token1": "So11111111111111111111111111111111111111112"
+      },
+      {
+        "name": "BIO/MYCO",
+        "address": "HhtxoFCY7uxQKBP1AHVXhCQ3jYtRWL3n1CwBKcfoun5Q",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "token1": "EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3"
+      },
+      {
+        "name": "MYCO/USDC",
+        "address": "5gYDeJbLeBsKJGm26VVt8XajjzR6wkg8d23YZnUMFwd1",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3",
+        "token1": "UNKNOWN_USDC_solana"
+      }
+    ]
+  }
+}

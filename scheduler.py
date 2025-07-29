@@ -119,6 +119,39 @@ class RaydiumScheduler:
             description="Daily evening portfolio analysis"
         )
         
+        # НОВЫЕ МУЛЬТИ-ЧЕЙН ЗАДАЧИ
+        # Multi-chain Telegram report - twice daily at 12:00 and 20:00 UTC
+        self.tasks['multichain_telegram_report'] = ScheduledTask(
+            name="Multi-Chain Telegram Report",
+            cron_expression="0 12,20 * * *",  # 12:00 and 20:00 UTC daily
+            function=self.run_multichain_telegram_report,
+            description="Comprehensive multi-chain portfolio report for Telegram"
+        )
+        
+        # Ethereum positions analysis - every 4 hours
+        self.tasks['ethereum_positions_analysis'] = ScheduledTask(
+            name="Ethereum Positions Analysis",
+            cron_expression="0 */4 * * *",  # Every 4 hours
+            function=self.run_ethereum_positions_analysis,
+            description="Ethereum Uniswap v3 positions monitoring"
+        )
+        
+        # Base positions analysis - every 4 hours (offset by 2 hours)
+        self.tasks['base_positions_analysis'] = ScheduledTask(
+            name="Base Positions Analysis", 
+            cron_expression="0 2,6,10,14,18,22 * * *",  # Every 4 hours offset by 2
+            function=self.run_base_positions_analysis,
+            description="Base Uniswap v3 positions monitoring"
+        )
+        
+        # Token data refresh - daily at 8:00 UTC
+        self.tasks['token_data_refresh'] = ScheduledTask(
+            name="Token Data Refresh",
+            cron_expression="0 8 * * *",  # 08:00 UTC daily
+            function=self.run_token_data_refresh,
+            description="Refresh token metadata from CoinGecko"
+        )
+        
         # PHI analysis - weekly on Sunday
         self.tasks['phi_analysis_weekly'] = ScheduledTask(
             name="PHI Analysis (Weekly)",
@@ -149,6 +182,14 @@ class RaydiumScheduler:
             cron_expression="0 23 * * *",  # 23:00 UTC daily
             function=self.send_daily_summary,
             description="Daily summary of alerts and issues"
+        )
+    
+        # DAO Pools Snapshots - twice daily at 09:30 and 21:30 UTC
+        self.tasks['dao_pools_snapshots'] = ScheduledTask(
+            name="DAO Pools Snapshots",
+            cron_expression="30 9,21 * * *",  # 09:30 and 21:30 UTC daily
+            function=self.run_dao_pools_snapshots,
+            description="Collect snapshots of all DAO pools with TVL > $10k for Metabase dashboard"
         )
     
     async def start(self):
@@ -574,13 +615,231 @@ class RaydiumScheduler:
             logging.error(f"PHI analysis failed: {e}")
             raise
     
+    # === НОВЫЕ МУЛЬТИ-ЧЕЙН ФУНКЦИИ ===
+    
+
+
+    async def run_ethereum_positions_analysis(self):
+        """Execute Ethereum positions analysis"""
+        try:
+            logging.info("Starting Ethereum positions analysis...")
+            
+            # Create a simple test script or use unified analyzer directly
+            result = subprocess.run([
+                'python3', '-c', 
+                '''
+import asyncio
+import sys
+import os
+sys.path.append("ethereum-analyzer")
+from unified_positions_analyzer import get_uniswap_positions
+
+async def main():
+    wallet = "0x31AAc4021540f61fe20c3dAffF64BA6335396850"
+    positions = await get_uniswap_positions(wallet, "ethereum", min_value_usd=0)
+    print(f"Found {len(positions)} Ethereum positions")
+    
+    total_value = sum(pos.get("total_value_usd", 0) for pos in positions)
+    print(f"Total Ethereum positions value: ${total_value:.2f}")
+    
+    for pos in positions[:5]:  # Show top 5
+        print(f"• {pos.get('pool_name', 'Unknown')}: ${pos.get('total_value_usd', 0):.2f}")
+
+asyncio.run(main())
+                '''
+            ], capture_output=True, text=True, timeout=180)  # 3 minute timeout
+            
+            if result.returncode != 0:
+                logging.error(f"Ethereum analysis stderr: {result.stderr}")
+                raise Exception(f"Ethereum positions analysis failed: {result.stderr}")
+            
+            # Extract output and send to Telegram
+            output = result.stdout.strip()
+            if output:
+                message = f"⚡ **ETHEREUM POSITIONS CHECK**\n```\n{output}\n```\n🕐 {datetime.now().strftime('%H:%M UTC')}"
+                await self.telegram.send_message(message)
+            
+            logging.info("Ethereum positions analysis completed successfully")
+            
+        except subprocess.TimeoutExpired:
+            raise Exception("Ethereum positions analysis timed out after 3 minutes")
+        except Exception as e:
+            logging.error(f"Ethereum positions analysis failed: {e}")
+            raise
+    
+    async def run_base_positions_analysis(self):
+        """Execute Base positions analysis"""
+        try:
+            logging.info("Starting Base positions analysis...")
+            
+            # Create a simple test script for Base
+            result = subprocess.run([
+                'python3', '-c', 
+                '''
+import asyncio
+import sys
+import os
+sys.path.append("ethereum-analyzer")
+from unified_positions_analyzer import get_uniswap_positions
+
+async def main():
+    wallet = "0x31AAc4021540f61fe20c3dAffF64BA6335396850"
+    try:
+        positions = await get_uniswap_positions(wallet, "base", min_value_usd=0)
+        print(f"Found {len(positions)} Base positions")
+        
+        total_value = sum(pos.get("total_value_usd", 0) for pos in positions)
+        print(f"Total Base positions value: ${total_value:.2f}")
+        
+        for pos in positions[:5]:  # Show top 5
+            print(f"• {pos.get('pool_name', 'Unknown')}: ${pos.get('total_value_usd', 0):.2f}")
+    except Exception as e:
+        print(f"Base analysis temporarily disabled: {e}")
+
+asyncio.run(main())
+                '''
+            ], capture_output=True, text=True, timeout=180)  # 3 minute timeout
+            
+            if result.returncode != 0:
+                logging.warning(f"Base analysis had issues: {result.stderr}")
+                # Don't fail the task, Base might have RPC issues
+                output = f"Base positions check had issues: {result.stderr[:200]}..."
+            else:
+                output = result.stdout.strip()
+            
+            # Send output to Telegram
+            if output:
+                message = f"🔵 **BASE POSITIONS CHECK**\n```\n{output}\n```\n🕐 {datetime.now().strftime('%H:%M UTC')}"
+                await self.telegram.send_message(message)
+            
+            logging.info("Base positions analysis completed")
+            
+        except subprocess.TimeoutExpired:
+            raise Exception("Base positions analysis timed out after 3 minutes")
+        except Exception as e:
+            logging.warning(f"Base positions analysis failed (non-critical): {e}")
+            # Don't raise for Base, as it might have temporary RPC issues
+    
+    async def run_token_data_refresh(self):
+        """Execute token data refresh from CoinGecko"""
+        try:
+            logging.info("Starting token data refresh...")
+            
+            # Run the token data script
+            result = subprocess.run([
+                'python3', 'get_token_data.py'
+            ], capture_output=True, text=True, timeout=120)  # 2 minute timeout
+            
+            if result.returncode != 0:
+                logging.error(f"Token data refresh stderr: {result.stderr}")
+                raise Exception(f"Token data refresh failed: {result.stderr}")
+            
+            # Extract key information from output
+            output_lines = result.stdout.strip().split('\n')
+            summary_lines = []
+            
+            # Look for summary information
+            for line in output_lines:
+                if any(keyword in line.lower() for keyword in ['получено', 'token', 'price', 'fdv', 'error']):
+                    summary_lines.append(line)
+            
+            # Create summary message
+            if summary_lines:
+                summary = "\n".join(summary_lines[-10:])  # Last 10 relevant lines
+                message = f"📊 **TOKEN DATA REFRESH**\n```\n{summary}\n```\n🕐 {datetime.now().strftime('%H:%M UTC')}"
+            else:
+                message = f"📊 **TOKEN DATA REFRESH COMPLETED**\n🕐 {datetime.now().strftime('%H:%M UTC')}"
+            
+            await self.telegram.send_message(message)
+            
+            logging.info("Token data refresh completed successfully")
+            
+        except subprocess.TimeoutExpired:
+            raise Exception("Token data refresh timed out after 2 minutes")
+        except Exception as e:
+            logging.error(f"Token data refresh failed: {e}")
+            raise
+    
+    async def run_multichain_telegram_report(self):
+        """Execute multi-chain Telegram report generation"""
+        try:
+            logging.info("Starting multi-chain Telegram report generation...")
+            
+            # Run the multi-chain report generator
+            result = subprocess.run([
+                'python3', 'multichain_report_generator.py'
+            ], capture_output=True, text=True, timeout=300)  # 5 minute timeout
+            
+            if result.returncode != 0:
+                logging.error(f"Multi-chain report generator stdout: {result.stdout}")
+                logging.error(f"Multi-chain report generator stderr: {result.stderr}")
+                raise Exception(f"Multi-chain report generator failed: {result.stderr}")
+            
+            # Extract success message from output
+            output = result.stdout.strip()
+            if "успешно создан и отправлен" in output or "successfully created and sent" in output:
+                logging.info("✅ Multi-chain Telegram report sent successfully")
+                
+                # Send additional status update
+                status_message = (
+                    f"📊 **MULTI-CHAIN REPORT DELIVERED**\n"
+                    f"🕐 {datetime.now().strftime('%H:%M UTC')}\n"
+                    f"🌐 Networks: Solana • Ethereum • Base\n"
+                    f"✅ Report sent to Telegram successfully"
+                )
+                await self.telegram.send_message(status_message)
+                
+            else:
+                # Check if there were partial errors but still some success
+                if "✅" in output:
+                    logging.warning("Multi-chain report partially successful")
+                else:
+                    raise Exception("Multi-chain report generation failed based on output")
+            
+            logging.info("Multi-chain Telegram report completed successfully")
+            
+        except subprocess.TimeoutExpired:
+            raise Exception("Multi-chain Telegram report timed out after 5 minutes")
+        except Exception as e:
+            logging.error(f"Multi-chain Telegram report failed: {e}")
+            raise
+    
+    async def _cleanup_old_csv_files(self):
+        """Clean up CSV files older than 7 days"""
+        try:
+            csv_files = glob.glob('pools_report_v4_*.csv')
+            cutoff_time = datetime.now() - timedelta(days=7)
+            
+            files_removed = 0
+            for file_path in csv_files:
+                try:
+                    file_time = datetime.fromtimestamp(os.path.getctime(file_path))
+                    if file_time < cutoff_time:
+                        os.remove(file_path)
+                        files_removed += 1
+                        logging.debug(f"Removed old CSV file: {file_path}")
+                except Exception as e:
+                    logging.warning(f"Could not remove old CSV file {file_path}: {e}")
+            
+            if files_removed > 0:
+                logging.info(f"Cleaned up {files_removed} old CSV files")
+                
+        except Exception as e:
+            logging.warning(f"Error during CSV cleanup: {e}")
+    
+    # === КОНЕЦ МУЛЬТИ-ЧЕЙН ФУНКЦИЙ ===
+    
     async def perform_health_check(self):
         """Perform system health check"""
         try:
             self.system_health['last_health_check'] = datetime.now(timezone.utc).isoformat()
             
-            # Check if core files exist
-            core_files = ['pool_analyzer.py', 'phi_analyzer.py', 'positions.py']
+            # Check if core files exist (including new multi-chain files)
+            core_files = [
+                'pool_analyzer.py', 'phi_analyzer.py', 'positions.py',
+                'get_token_data.py', 'tokens_pools_config.json', 'dao_pools_snapshot.py',
+                'ethereum-analyzer/unified_positions_analyzer.py', 'multichain_report_generator.py'
+            ]
             missing_files = [f for f in core_files if not os.path.exists(f)]
             
             if missing_files:
@@ -642,6 +901,50 @@ class RaydiumScheduler:
             await alerting_system.send_daily_alert_summary()
         except Exception as e:
             logging.error(f"Failed to send daily summary: {e}")
+    
+    async def run_dao_pools_snapshots(self):
+        """Execute DAO pools snapshots collection"""
+        try:
+            logging.info("Starting DAO pools snapshots collection...")
+            
+            # Run the DAO pools snapshot generator
+            result = subprocess.run([
+                'python3', 'dao_pools_snapshot.py'
+            ], capture_output=True, text=True, timeout=300)  # 5 minute timeout
+            
+            if result.returncode != 0:
+                logging.error(f"DAO pools snapshot stdout: {result.stdout}")
+                logging.error(f"DAO pools snapshot stderr: {result.stderr}")
+                raise Exception(f"DAO pools snapshot failed: {result.stderr}")
+            
+            # Extract summary from output
+            output = result.stdout.strip()
+            
+            # Look for key statistics in output
+            lines = output.split('\n')
+            summary_lines = []
+            
+            for line in lines:
+                if any(keyword in line for keyword in ['снапшотов:', 'пулов,', 'TVL:', '✅', '📊']):
+                    summary_lines.append(line)
+            
+            # Create summary message for Telegram
+            if summary_lines:
+                summary = "\n".join(summary_lines[-15:])  # Last 15 relevant lines
+                message = f"📊 **DAO POOLS SNAPSHOT COMPLETED**\n```\n{summary}\n```\n🕐 {datetime.now().strftime('%H:%M UTC')}"
+            else:
+                message = f"📊 **DAO POOLS SNAPSHOT COMPLETED**\n🕐 {datetime.now().strftime('%H:%M UTC')}"
+            
+            # Send summary to Telegram
+            await self.telegram.send_message(message)
+            
+            logging.info("DAO pools snapshots collection completed successfully")
+            
+        except subprocess.TimeoutExpired:
+            raise Exception("DAO pools snapshots collection timed out after 5 minutes")
+        except Exception as e:
+            logging.error(f"DAO pools snapshots collection failed: {e}")
+            raise
     
     # Web endpoints
     async def health_endpoint(self, request):

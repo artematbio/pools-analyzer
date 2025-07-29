@@ -236,6 +236,11 @@ class SupabaseHandler:
                         tvl_change_percent = ((current_tvl - historical_tvl) / historical_tvl) * 100
                         tvl_change_usd = current_tvl - historical_tvl
             
+            # Рассчитываем 7-дневные метрики
+            metrics_7d = {}
+            if 'pool_id' in pool_data:
+                metrics_7d = self.calculate_7d_metrics(pool_data['pool_id'])
+            
             # Подготавливаем данные для сохранения
             converted_data = self._convert_data(pool_data)
             
@@ -243,6 +248,9 @@ class SupabaseHandler:
             if tvl_change_percent is not None:
                 converted_data['tvl_change_percent'] = tvl_change_percent
                 converted_data['tvl_change_usd'] = tvl_change_usd
+                
+            # Добавляем 7-дневные метрики
+            converted_data.update(metrics_7d)
             
             result = self.client.table('lp_pool_snapshots').insert(converted_data).execute()
             
@@ -327,6 +335,265 @@ class SupabaseHandler:
         except Exception as e:
             logging.error(f"❌ Ошибка batch операции: {e}")
             return 0
+    
+    # === МУЛЬТИ-ЧЕЙН ИНТЕГРАЦИЯ ===
+    
+    def save_ethereum_pool_data(self, pool_data: Dict[str, Any], network: str = "ethereum") -> Optional[str]:
+        """Сохранить данные пула Ethereum/Base в lp_pool_snapshots"""
+        try:
+            if not self.is_connected():
+                return None
+            
+            # Адаптация данных Ethereum пула для lp_pool_snapshots
+            pool_snapshot_data = {
+                'pool_id': pool_data.get('pool_address', ''),  # ✅ БЕЗ ПРЕФИКСОВ
+                'pool_name': pool_data.get('pool_name') or f"{pool_data.get('token0_symbol', 'TOKEN0')}/{pool_data.get('token1_symbol', 'TOKEN1')}",  # ✅ ПРАВИЛЬНЫЕ ИМЕНА
+                'token0_address': pool_data.get('token0_address'),
+                'token0_symbol': pool_data.get('token0_symbol'),
+                'token0_price': float(pool_data.get('token0_price_usd', 0)),
+                'token1_address': pool_data.get('token1_address'),
+                'token1_symbol': pool_data.get('token1_symbol'),
+                'token1_price': float(pool_data.get('token1_price_usd', 0)),
+                'current_price': float(pool_data.get('current_price', 0)),
+                'fee_rate': float(pool_data.get('fee_tier', 0)) / 10000,  # Convert from basis points to decimal
+                'tvl_usd': float(pool_data.get('tvl_usd', 0)),
+                'volume_24h_usd': float(pool_data.get('volume_24h_usd', 0)),
+                'total_positions': pool_data.get('total_positions', 0),
+                'in_range_positions': pool_data.get('in_range_positions', 0),
+                'out_of_range_positions': pool_data.get('out_of_range_positions', 0),
+                'total_value_usd': float(pool_data.get('total_value_usd', 0)),
+                # Ethereum/Base specific fields
+                'network': network,
+                'pool_address': pool_data.get('pool_address'),
+                'tick_current': pool_data.get('current_tick') or pool_data.get('tick'),
+                'sqrt_price_x96': pool_data.get('sqrt_price_x96') or pool_data.get('sqrtPriceX96'),
+                # Убрано 'liquidity' поле - оно удаляется из таблицы
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            # Рассчитываем 24h изменения если есть исторические данные
+            try:
+                pool_snapshot_data.update(self._calculate_24h_changes(pool_data.get('pool_address') or pool_data.get('pool_id', ''), network))
+            except Exception as e:
+                logging.warning(f"Не удалось рассчитать 24h изменения для пула: {e}")
+                pool_snapshot_data.update({
+                    'price_change_24h_percent': None,
+                    'volume_change_24h_percent': None
+                })
+            
+            return self.save_pool_snapshot(pool_snapshot_data)
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка сохранения пула {network}: {e}")
+            return None
+    
+    def save_ethereum_position_data(self, position_data: Dict[str, Any], network: str = "ethereum") -> Optional[str]:
+        """Сохранить данные позиции Ethereum/Base в lp_position_snapshots"""
+        try:
+            if not self.is_connected():
+                return None
+            
+            # Адаптация данных позиции Ethereum для lp_position_snapshots
+            position_snapshot_data = {
+                'position_mint': position_data.get('position_id', ''),  # Чистый position_id без префикса
+                'pool_id': position_data.get('pool_address', ''),  # Чистый pool_address без префикса
+                'pool_name': position_data.get('pool_name', f"{position_data.get('token0_symbol', 'UNK')}/{position_data.get('token1_symbol', 'UNK')}"),
+                'token0_address': position_data.get('token0_address'),
+                'token0_symbol': position_data.get('token0_symbol'),
+                'token0_amount': float(position_data.get('amount0') or 0),
+                'token1_address': position_data.get('token1_address'),
+                'token1_symbol': position_data.get('token1_symbol'),
+                'token1_amount': float(position_data.get('amount1') or 0),
+                'position_value_usd': float(position_data.get('total_value_usd') or 0),
+                'fees_usd': float(position_data.get('unclaimed_fees_usd') or 0),
+                'in_range': position_data.get('in_range', False),
+                'tick_lower': position_data.get('tick_lower'),
+                'tick_upper': position_data.get('tick_upper'),
+                'current_price': float(position_data.get('current_price') or 0),
+                'fee_tier': float(position_data.get('fee_tier') or 0) / 10000,  # Convert from basis points
+                'liquidity_share_percent': 0,  # Can be calculated later if needed
+                'liquidity': str(position_data.get('liquidity') or 0),
+                'position_pda': position_data.get('position_id'),  # Store position ID
+                'unclaimed_fees_token0': float(position_data.get('unclaimed_fees_token0') or 0),
+                'unclaimed_fees_token1': float(position_data.get('unclaimed_fees_token1') or 0),
+                'token0_price_usd': float(position_data.get('token0_price_usd') or 0),
+                'token1_price_usd': float(position_data.get('token1_price_usd') or 0),
+                'tick_current': position_data.get('current_tick'),
+                'price_range_min': float(position_data.get('price_lower') or 0),
+                'price_range_max': float(position_data.get('price_upper') or 0),
+                'network': network,  # Добавляем сеть для идентификации
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            return self.save_position_snapshot(position_snapshot_data)
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка сохранения позиции {network}: {e}")
+            return None
+    
+    def save_multichain_csv_data(self, csv_data: Dict[str, Any]) -> Dict[str, int]:
+        """Сохранить данные из мульти-чейн CSV генератора"""
+        try:
+            if not self.is_connected():
+                return {'pools': 0, 'positions': 0}
+            
+            pools_saved = 0
+            positions_saved = 0
+            
+            # Обрабатываем данные пулов из CSV
+            pools_data = csv_data.get('pools', [])
+            for pool in pools_data:
+                network = pool.get('chain', 'unknown')
+                if network in ['ethereum', 'base']:
+                    result = self.save_ethereum_pool_data(pool, network)
+                    if result:
+                        pools_saved += 1
+                elif network == 'solana':
+                    # Для Solana используем стандартный метод
+                    result = self.save_pool_snapshot(pool)
+                    if result:
+                        pools_saved += 1
+            
+            # Обрабатываем данные позиций из CSV
+            positions_data = csv_data.get('positions', [])
+            for position in positions_data:
+                network = position.get('network', 'unknown')
+                if network in ['ethereum', 'base']:
+                    result = self.save_ethereum_position_data(position, network)
+                    if result:
+                        positions_saved += 1
+                elif network == 'solana':
+                    # Для Solana используем стандартный метод
+                    result = self.save_position_snapshot(position)
+                    if result:
+                        positions_saved += 1
+            
+            logging.info(f"✅ Multichain CSV данные сохранены: {pools_saved} пулов, {positions_saved} позиций")
+            return {'pools': pools_saved, 'positions': positions_saved}
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка сохранения multichain CSV данных: {e}")
+            return {'pools': 0, 'positions': 0}
+    
+    def get_network_statistics(self) -> Dict[str, Dict[str, int]]:
+        """Получить статистику по сетям"""
+        try:
+            if not self.is_connected():
+                return {}
+            
+            stats = {}
+            
+            # Статистика пулов по сетям
+            pool_result = self.client.table('lp_pool_snapshots').select(
+                'network'
+            ).execute()
+            
+            if pool_result.data:
+                network_counts = {}
+                for record in pool_result.data:
+                    network = record.get('network', 'unknown')
+                    network_counts[network] = network_counts.get(network, 0) + 1
+                stats['pools'] = network_counts
+            
+            # Статистика позиций по сетям (извлекаем из position_mint)
+            position_result = self.client.table('lp_position_snapshots').select(
+                'position_mint'
+            ).execute()
+            
+            if position_result.data:
+                network_counts = {}
+                for record in position_result.data:
+                    position_mint = record.get('position_mint', '')
+                    if position_mint.startswith('ethereum_'):
+                        network = 'ethereum'
+                    elif position_mint.startswith('base_'):
+                        network = 'base'
+                    else:
+                        network = 'solana'
+                    network_counts[network] = network_counts.get(network, 0) + 1
+                stats['positions'] = network_counts
+            
+            return stats
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка получения статистики сетей: {e}")
+            return {}
+    
+    def get_pool_tvl_yesterday(self, pool_address: str, network: str) -> Optional[float]:
+        """
+        Получает TVL пула за прошлый день из Supabase
+        
+        Args:
+            pool_address: Адрес пула
+            network: Сеть (ethereum, base, solana)
+            
+        Returns:
+            TVL за прошлый день или None если не найдено
+        """
+        try:
+            if not self.is_connected():
+                return None
+            
+            from datetime import datetime, timedelta
+            
+            # Вчерашняя дата
+            yesterday = datetime.utcnow() - timedelta(days=1)
+            yesterday_str = yesterday.strftime('%Y-%m-%d')
+            
+            # Ищем запись за вчерашний день
+            response = self.client.table("lp_pool_snapshots").select("tvl_usd").eq(
+                "pool_address", pool_address
+            ).eq(
+                "network", network
+            ).gte(
+                "created_at", f"{yesterday_str} 00:00:00"
+            ).lt(
+                "created_at", f"{yesterday_str} 23:59:59"
+            ).order("created_at", desc=True).limit(1).execute()
+            
+            if response.data:
+                # tvl_usd колонка содержит TVL в USD для пулов
+                return float(response.data[0].get("tvl_usd", 0))
+            
+            return None
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка получения TVL пула за вчера: {e}")
+            return None
+    
+    def calculate_tvl_change_indicator(self, current_tvl: float, pool_address: str, network: str) -> str:
+        """
+        Рассчитывает индикатор изменения TVL
+        
+        Args:
+            current_tvl: Текущий TVL
+            pool_address: Адрес пула  
+            network: Сеть
+            
+        Returns:
+            Строка с индикатором изменения (пустая если изменение меньше 5%)
+        """
+        try:
+            yesterday_tvl = self.get_pool_tvl_yesterday(pool_address, network)
+            
+            if yesterday_tvl is None or yesterday_tvl == 0:
+                return ""  # Нет данных за вчера
+            
+            # Рассчитываем изменение в процентах
+            change_percent = ((current_tvl - yesterday_tvl) / yesterday_tvl) * 100
+            
+            # Если изменение больше 5% в любую сторону
+            if abs(change_percent) >= 5:
+                if change_percent > 0:
+                    return f" 📈 +{change_percent:.1f}%"
+                else:
+                    return f" 📉 {change_percent:.1f}%"
+            
+            return ""  # Изменение меньше 5%
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка расчета изменения TVL: {e}")
+            return ""
     
     # === QUERY METHODS ===
     def get_recent_alerts(self, limit: int = 10) -> List[Dict[str, Any]]:
@@ -440,6 +707,57 @@ class SupabaseHandler:
             logging.error(f"❌ Ошибка получения исторических данных TVL: {e}")
             return None
 
+    def calculate_7d_metrics(self, pool_id: str) -> dict:
+        """Рассчитать метрики за 7 дней"""
+        try:
+            if not self.is_connected():
+                return {'tvl_7d_change_pct': None, 'volume_7d_avg_usd': None}
+                
+            # Получить данные за 7 дней
+            from datetime import datetime, timedelta
+            week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+            
+            result = self.client.table('lp_pool_snapshots').select(
+                'tvl_usd, volume_24h_usd, created_at'
+            ).eq('pool_id', pool_id).gte('created_at', week_ago).order('created_at', desc=True).execute()
+            
+            if result.data and len(result.data) > 1:
+                # Берем самую свежую и самую старую записи
+                current_record = result.data[0]
+                old_record = result.data[-1]
+                
+                current_tvl = float(current_record.get('tvl_usd', 0))
+                old_tvl = float(old_record.get('tvl_usd', 0))
+                
+                # TVL изменение за 7 дней
+                tvl_7d_change = 0.0
+                if old_tvl > 0:
+                    tvl_7d_change = ((current_tvl - old_tvl) / old_tvl) * 100
+                
+                # Средний объем за 7 дней
+                volumes = []
+                for record in result.data:
+                    volume = record.get('volume_24h_usd')
+                    if volume is not None:
+                        volumes.append(float(volume))
+                
+                avg_volume_7d = sum(volumes) / len(volumes) if volumes else 0.0
+                
+                return {
+                    'tvl_7d_change_pct': round(tvl_7d_change, 4),
+                    'volume_7d_avg_usd': round(avg_volume_7d, 2)
+                }
+            else:
+                # Недостаточно данных за 7 дней
+                return {
+                    'tvl_7d_change_pct': None,
+                    'volume_7d_avg_usd': None
+                }
+                
+        except Exception as e:
+            logging.error(f"❌ Ошибка расчета 7-дневных метрик: {e}")
+            return {'tvl_7d_change_pct': None, 'volume_7d_avg_usd': None}
+
     def calculate_tvl_change(self, current_tvl: float, historical_tvl: float) -> Optional[float]:
         """Рассчитать изменение TVL в процентах"""
         try:
@@ -451,6 +769,151 @@ class SupabaseHandler:
             
         except Exception as e:
             logging.error(f"❌ Ошибка расчета изменения TVL: {e}")
+            return None
+
+    def _calculate_24h_changes(self, pool_address: str, network: str) -> Dict[str, Any]:
+        """Рассчитывает 24-часовое изменение цены и объема для пула."""
+        try:
+            if not self.is_connected():
+                return {'price_change_24h_percent': None, 'volume_change_24h_percent': None}
+
+            # Получаем текущие данные пула
+            current_pool_data = self.client.table('lp_pool_snapshots').select('*').eq(
+                'pool_address', pool_address
+            ).eq(
+                'network', network
+            ).order('created_at', desc=True).limit(1).execute()
+
+            if not current_pool_data.data:
+                return {'price_change_24h_percent': None, 'volume_change_24h_percent': None}
+
+            current_record = current_pool_data.data[0]
+            current_price = float(current_record.get('current_price', 0))
+            current_volume = float(current_record.get('volume_24h_usd', 0))
+
+            # Получаем данные за 24 часа назад
+            from datetime import datetime, timedelta
+            twenty_four_hours_ago = (datetime.now() - timedelta(hours=24)).isoformat()
+
+            historical_pool_data = self.client.table('lp_pool_snapshots').select('*').eq(
+                'pool_address', pool_address
+            ).eq(
+                'network', network
+            ).lte('created_at', twenty_four_hours_ago).order('created_at', desc=True).limit(1).execute()
+
+            if not historical_pool_data.data:
+                return {'price_change_24h_percent': None, 'volume_change_24h_percent': None}
+
+            historical_record = historical_pool_data.data[0]
+            historical_price = float(historical_record.get('current_price', 0))
+            historical_volume = float(historical_record.get('volume_24h_usd', 0))
+
+            # Рассчитываем процентные изменения
+            price_change_percent = None
+            if historical_price > 0:
+                price_change_percent = ((current_price - historical_price) / historical_price) * 100
+
+            volume_change_percent = None
+            if historical_volume > 0:
+                volume_change_percent = ((current_volume - historical_volume) / historical_volume) * 100
+
+            return {
+                'price_change_24h_percent': round(price_change_percent, 2) if price_change_percent is not None else None,
+                'volume_change_24h_percent': round(volume_change_percent, 2) if volume_change_percent is not None else None
+            }
+        except Exception as e:
+            logging.error(f"❌ Ошибка расчета 24h изменений: {e}")
+            return {'price_change_24h_percent': None, 'volume_change_24h_percent': None}
+
+    def get_historical_token_price(self, token_symbol: str, days_back: int = 1) -> Optional[float]:
+        """Получить историческую цену токена N дней назад"""
+        try:
+            if not self.is_connected():
+                return None
+                
+            # Рассчитываем дату N дней назад
+            target_date = datetime.now() - timedelta(days=days_back)
+            
+            # Ищем снапшот ближайший к целевой дате
+            # Берем последний снапшот за целевой день
+            result = self.client.table('dao_pool_snapshots').select('token_price_usd').eq(
+                'token_symbol', token_symbol
+            ).gte(
+                'snapshot_timestamp', target_date.strftime('%Y-%m-%d')
+            ).lt(
+                'snapshot_timestamp', (target_date + timedelta(days=1)).strftime('%Y-%m-%d')
+            ).order(
+                'snapshot_timestamp', desc=True
+            ).limit(1).execute()
+            
+            if result.data and len(result.data) > 0:
+                price = result.data[0]['token_price_usd']
+                if price and price > 0:
+                    return float(price)
+            
+            # Если за точный день не найдено, ищем ближайший более ранний
+            result_fallback = self.client.table('dao_pool_snapshots').select('token_price_usd').eq(
+                'token_symbol', token_symbol
+            ).lt(
+                'snapshot_timestamp', target_date.strftime('%Y-%m-%d')
+            ).order(
+                'snapshot_timestamp', desc=True
+            ).limit(1).execute()
+            
+            if result_fallback.data and len(result_fallback.data) > 0:
+                price = result_fallback.data[0]['token_price_usd']
+                if price and price > 0:
+                    return float(price)
+                    
+            return None
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка получения исторической цены для {token_symbol} ({days_back}д назад): {e}")
+            return None
+
+    def get_historical_token_tvl(self, token_symbol: str, days_back: int = 7) -> Optional[float]:
+        """Получить общий TVL токена N дней назад"""
+        try:
+            if not self.is_connected():
+                return None
+                
+            target_date = datetime.now() - timedelta(days=days_back)
+            
+            # Суммируем TVL всех реальных пулов токена на целевую дату  
+            result = self.client.table('dao_pool_snapshots').select('tvl_usd').eq(
+                'token_symbol', token_symbol
+            ).neq(
+                'pool_address', ''  # Исключаем виртуальные пулы
+            ).gte(
+                'snapshot_timestamp', target_date.strftime('%Y-%m-%d')
+            ).lt(
+                'snapshot_timestamp', (target_date + timedelta(days=1)).strftime('%Y-%m-%d')
+            ).execute()
+            
+            if result.data and len(result.data) > 0:
+                # Суммируем TVL всех пулов
+                total_tvl = sum(float(record['tvl_usd']) for record in result.data if record['tvl_usd'])
+                return total_tvl
+            
+            # Fallback: ищем ближайшую более раннюю дату
+            result_fallback = self.client.table('dao_pool_snapshots').select('tvl_usd').eq(
+                'token_symbol', token_symbol
+            ).neq(
+                'pool_address', ''
+            ).lt(
+                'snapshot_timestamp', target_date.strftime('%Y-%m-%d')
+            ).order(
+                'snapshot_timestamp', desc=True
+            ).limit(10).execute()  # Берем больше записей для агрегации
+            
+            if result_fallback.data and len(result_fallback.data) > 0:
+                total_tvl = sum(float(record['tvl_usd']) for record in result_fallback.data if record['tvl_usd'])
+                return total_tvl
+                
+            return None
+            
+        except Exception as e:
+            logging.error(f"❌ Ошибка получения исторического TVL для {token_symbol} ({days_back}д назад): {e}")
             return None
 
 # Глобальный экземпляр для использования в других модулях

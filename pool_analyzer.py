@@ -213,13 +213,18 @@ TOKEN_SYMBOL_MAP = {
    "FvgqHMfL9yn39V79huDPy3YUNDoYJpuLWng2JfmQpump": "URO"
 }
 
-# Словарь сопоставления адресов токенов с их CoinGecko ID
+# Словарь сопоставления адресов токенов с их CoinGecko ID - ИЗ tokens_pools_config.json ✅
 TOKEN_COINGECKO_IDS = {
-    "So11111111111111111111111111111111111111112": "solana",    # SOL
-    "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ": "bio-protocol", # BIO
-    "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR": "spine", # SPINE
-    "GJtJuWD9qYcCkrwMBmtY1tpapV1sKfB2zUv9Q4aqpump": "rifampicin", # RIF
-    "FvgqHMfL9yn39V79huDPy3YUNDoYJpuLWng2JfmQpump": "urolithin-a", # URO
+    "So11111111111111111111111111111111111111112": "solana",              # SOL ✅
+    "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ": "bio-protocol",        # BIO ✅
+    "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR": "spinedao-token",      # SPINE ✅ ИСПРАВЛЕНО!
+    "9qU3LmwKJKT2DJeGPihyTP2jc6pC7ij3hPFeyJVzuksN": "curetopia",          # CURES ✅ ИСПРАВЛЕНО!
+    "qbioCGDnUBGX5qcK1Fc4zg19GaQEPmxHFMPMZQm4LZ8": "quantum-biology-dao", # QBIO ✅
+    "GJtJuWD9qYcCkrwMBmtY1tpapV1sKfB2zUv9Q4aqpump": "rifampicin",         # RIF ✅
+    "FvgqHMfL9yn39V79huDPy3YUNDoYJpuLWng2JfmQpump": "urolithin-a",        # URO ✅
+    "growFDf9teg9gwVTTY3DgpPXU31qBrnbSQCqtY2vkR8": "valleydao",           # GROW ✅
+    "neuRodi6Saw2cwDpud7FyAcjzqPBJDtr3fDTXE2Fu4j": "cerebrum-dao",        # NEURON ✅
+    # "EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3": "mycelium",        # MYCO ❌ ОТКЛЮЧЕН - будет через GeckoTerminal
 }
 
 # Определяем константы из TOKEN_SYMBOL_MAP
@@ -1827,6 +1832,75 @@ async def duplicate_token_prices_to_supabase(token_prices: Dict[str, Decimal], s
         print(f"[BACKGROUND] ❌ Error duplicating token prices to Supabase: {e}")
         return False
 
+async def get_token_market_cap_geckoterminal(token_address: str, client: httpx.AsyncClient, network: str = "solana") -> float:
+    """
+    Получает market cap токена через GeckoTerminal API (fallback)
+    """
+    try:
+        url = f"https://api.geckoterminal.com/api/v2/networks/{network}/tokens/{token_address}"
+        
+        response = await client.get(url, timeout=10.0)
+        if response.status_code != 200:
+            print(f"[WARN] GeckoTerminal API error for {token_address[:8]}...: {response.status_code}")
+            return 0.0
+            
+        data = response.json()
+        token_data = data.get("data", {}).get("attributes", {})
+        
+        # Пробуем market_cap_usd, если нет - используем fdv_usd
+        market_cap = token_data.get("market_cap_usd")
+        if market_cap is None:
+            market_cap = token_data.get("fdv_usd", 0)
+        
+        if market_cap:
+            market_cap = float(market_cap)
+            symbol = token_data.get("symbol", "Unknown")
+            print(f"[BACKGROUND] ✅ GeckoTerminal market cap for {symbol}: ${market_cap:,.0f}")
+            return market_cap
+        else:
+            return 0.0
+            
+    except Exception as e:
+        print(f"[WARN] Error fetching market cap from GeckoTerminal for {token_address[:8]}...: {e}")
+        return 0.0
+
+async def get_token_market_cap_by_address(token_address: str, client: httpx.AsyncClient) -> float:
+    """
+    Получает market cap токена - сначала CoinGecko, потом GeckoTerminal fallback
+    """
+    coingecko_id = TOKEN_COINGECKO_IDS.get(token_address)
+    
+    # Сначала пробуем CoinGecko (если есть ID)
+    if coingecko_id:
+        try:
+            url = f"{COINGECKO_ENDPOINT}coins/{coingecko_id}"
+            
+            headers = {}
+            if COINGECKO_API_KEY:
+                headers["x-cg-pro-api-key"] = COINGECKO_API_KEY
+            
+            response = await client.get(url, headers=headers)
+            if response.status_code == 200:
+                data = response.json()
+                market_cap = data.get("market_data", {}).get("market_cap", {}).get("usd", 0)
+                
+                if market_cap:
+                    symbol = TOKEN_SYMBOL_MAP.get(token_address, 'Unknown')
+                    print(f"[BACKGROUND] ✅ CoinGecko market cap for {symbol}: ${market_cap:,.0f}")
+                    return float(market_cap)
+                else:
+                    print(f"[WARN] No market cap data for {coingecko_id}")
+            else:
+                print(f"[WARN] CoinGecko API error for {coingecko_id}: {response.status_code}")
+                
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch market cap from CoinGecko for {coingecko_id}: {e}")
+    
+    # Fallback: пробуем GeckoTerminal
+    symbol = TOKEN_SYMBOL_MAP.get(token_address, token_address[:8])
+    print(f"[BACKGROUND] 🔄 Trying GeckoTerminal fallback for {symbol}...")
+    return await get_token_market_cap_geckoterminal(token_address, client)
+
 async def duplicate_pool_data_to_supabase(pool_data: Dict[str, Any]) -> bool:
     """
     Дублирует данные пула в Supabase
@@ -1842,14 +1916,29 @@ async def duplicate_pool_data_to_supabase(pool_data: Dict[str, Any]) -> bool:
             print(f"[BACKGROUND] ⚠️ Supabase handler not available for pool {pool_name}")
             return False
         
+        # Получаем market cap для токенов
+        token0_address = pool_data.get('mintA', {}).get('address')
+        token1_address = pool_data.get('mintB', {}).get('address')
+        
+        # Создаем httpx клиент для market cap запросов
+        import httpx
+        async with httpx.AsyncClient(timeout=30.0) as market_cap_client:
+            market_cap_token0 = 0.0
+            market_cap_token1 = 0.0
+            
+            if token0_address:
+                market_cap_token0 = await get_token_market_cap_by_address(token0_address, market_cap_client)
+            if token1_address:
+                market_cap_token1 = await get_token_market_cap_by_address(token1_address, market_cap_client)
+
         # Подготавливаем данные для сохранения
         pool_snapshot_data = {
             'pool_id': pool_data.get('id'),
             'pool_name': pool_name,
-            'token0_address': pool_data.get('mintA', {}).get('address'),
+            'token0_address': token0_address,
             'token0_symbol': pool_data.get('mintA', {}).get('symbol', 'Unknown'),
             'token0_price': float(pool_data.get('mintA', {}).get('price', 0)),
-            'token1_address': pool_data.get('mintB', {}).get('address'),
+            'token1_address': token1_address,
             'token1_symbol': pool_data.get('mintB', {}).get('symbol', 'Unknown'),
             'token1_price': float(pool_data.get('mintB', {}).get('price', 0)),
             'current_price': float(pool_data.get('price', 0)),
@@ -1860,7 +1949,12 @@ async def duplicate_pool_data_to_supabase(pool_data: Dict[str, Any]) -> bool:
             'in_range_positions': pool_data.get('in_range_positions', 0),
             'out_of_range_positions': pool_data.get('out_of_range_positions', 0),
             'total_value_usd': float(pool_data.get('total_usd_value', 0)),
-
+            # ДОБАВЛЯЕМ MARKET CAP ПОЛЯ
+            'market_cap_token0': market_cap_token0 if market_cap_token0 > 0 else None,
+            'market_cap_token1': market_cap_token1 if market_cap_token1 > 0 else None,
+            # ДОБАВЛЯЕМ NETWORK ДЛЯ SOLANA
+            'network': 'solana',
+            'pool_address': pool_data.get('id'),  # Для Solana pool_id = pool_address
             'timestamp': datetime.now().isoformat()
         }
         
