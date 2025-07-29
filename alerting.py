@@ -462,23 +462,32 @@ class AlertingSystem:
     async def send_startup_notification(self) -> bool:
         """Send notification when system starts up"""
         try:
-            startup_message = f"""🚀 <b>SYSTEM STARTUP</b>
+            startup_message = f"""🚀 <b>MULTICHAIN SYSTEM STARTUP</b>
 
-✅ Raydium Pool Analyzer is now online
+✅ Multi-Chain Pool Analyzer is now online
 📅 {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
 
 <b>Services Started:</b>
-• Pool Analyzer
-• PHI Analyzer  
+• Multi-Chain Pool Analyzer (Solana + Ethereum + Base)
+• DAO Pools Snapshot Generator
+• Ethereum/Base Positions Analyzer
 • Telegram Bot
 • Scheduler
 • Alerting System
 
+<b>Active Networks:</b>
+🟣 Solana (Raydium CLMM)
+🔵 Ethereum (Uniswap V3) 
+🔵 Base (Uniswap V3)
+
 <b>Schedule:</b>
-• Pool Analysis: 09:00 & 18:00 UTC daily
+• Ethereum Positions: Every 4 hours
+• Base Positions: Every 4 hours (+2h offset)
+• DAO Pools Snapshots: 09:30 & 21:30 UTC
+• Multi-Chain Reports: 12:00 & 20:00 UTC
 • PHI Analysis: Sunday 18:30 UTC
 
-🔄 System ready for automated monitoring"""
+🔄 Multi-chain system ready for automated monitoring"""
             
             success = await self.telegram.send_message(startup_message)
             

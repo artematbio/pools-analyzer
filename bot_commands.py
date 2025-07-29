@@ -142,25 +142,41 @@ class BotCommandHandler:
 • /test - Тест функций
 
 <b>⚡️ Автоматические отчеты:</b>
-• 📊 Анализ пулов: Ежедневно в 09:00 & 18:00 UTC
+• 🔵 Ethereum позиции: Каждые 4 часа
+• 🔵 Base позиции: Каждые 4 часа (+2ч смещение)
+• 📊 DAO Pool снапшоты: 09:30 & 21:30 UTC
+• 🚀 Мультичейн отчеты: 12:00 & 20:00 UTC
 • 🔮 PHI Анализ: Воскресенье в 18:30 UTC
+
+<b>🌐 Поддерживаемые сети:</b>
+• 🟣 Solana (Raydium CLMM)
+• 🔵 Ethereum (Uniswap V3)
+• 🔵 Base (Uniswap V3)
 
 Все отчеты приходят в эту группу автоматически."""
         else:
-            welcome_message = """🚀 <b>RAYDIUM POOL ANALYZER BOT</b>
+            welcome_message = """🚀 <b>MULTICHAIN POOL ANALYZER BOT</b>
 
-Welcome to your automated DeFi portfolio monitoring system!
+Welcome to your automated Multi-Chain DeFi portfolio monitoring system!
 
 <b>Available Commands:</b>
 /help - Show this help message
 /status - System status and health check
-/run_analysis - Manually trigger pool analysis
+/run_analysis - Manually trigger analysis
 /schedule - View scheduled tasks
 /test - Test bot functionality
 
 <b>Automated Schedule:</b>
-• 📊 Pool Analysis: Daily at 09:00 & 18:00 UTC
+• 🔵 Ethereum Positions: Every 4 hours
+• 🔵 Base Positions: Every 4 hours (+2h offset)
+• 📊 DAO Pool Snapshots: 09:30 & 21:30 UTC
+• 🚀 Multi-Chain Reports: 12:00 & 20:00 UTC
 • 🔮 PHI Analysis: Weekly on Sunday at 18:30 UTC
+
+<b>🌐 Supported Networks:</b>
+• 🟣 Solana (Raydium CLMM)
+• 🔵 Ethereum (Uniswap V3)
+• 🔵 Base (Uniswap V3)
 
 The bot will automatically send analysis reports to this chat."""
         
@@ -396,14 +412,52 @@ Use /run_analysis to trigger manual analysis."""
         now = datetime.now(timezone.utc)
         tasks = []
         
-        # Calculate next pool analysis times (09:00 and 18:00 daily)
-        for hour in [9, 18]:
+        # Calculate next Ethereum positions analysis (every 4 hours: 0, 4, 8, 12, 16, 20)
+        eth_hours = [0, 4, 8, 12, 16, 20]
+        next_eth_hour = min([h for h in eth_hours if h > now.hour] + [eth_hours[0]])
+        next_eth_time = now.replace(hour=next_eth_hour, minute=0, second=0, microsecond=0)
+        if next_eth_hour <= now.hour:
+            next_eth_time += timedelta(days=1)
+        
+        tasks.append({
+            'name': 'Ethereum Positions',
+            'time': next_eth_time.strftime('%Y-%m-%d %H:%M UTC'),
+            'timestamp': next_eth_time
+        })
+        
+        # Calculate next Base positions analysis (every 4 hours +2h offset: 2, 6, 10, 14, 18, 22)
+        base_hours = [2, 6, 10, 14, 18, 22]
+        next_base_hour = min([h for h in base_hours if h > now.hour] + [base_hours[0]])
+        next_base_time = now.replace(hour=next_base_hour, minute=0, second=0, microsecond=0)
+        if next_base_hour <= now.hour:
+            next_base_time += timedelta(days=1)
+        
+        tasks.append({
+            'name': 'Base Positions',
+            'time': next_base_time.strftime('%Y-%m-%d %H:%M UTC'),
+            'timestamp': next_base_time
+        })
+        
+        # Calculate next DAO pools snapshots (09:30 and 21:30 daily)
+        for hour, minute in [(9, 30), (21, 30)]:
+            next_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if next_time <= now:
+                next_time += timedelta(days=1)
+            
+            tasks.append({
+                'name': 'DAO Pools Snapshot',
+                'time': next_time.strftime('%Y-%m-%d %H:%M UTC'),
+                'timestamp': next_time
+            })
+        
+        # Calculate next multichain reports (12:00 and 20:00 daily)
+        for hour in [12, 20]:
             next_time = now.replace(hour=hour, minute=0, second=0, microsecond=0)
             if next_time <= now:
                 next_time += timedelta(days=1)
             
             tasks.append({
-                'name': 'Pool Analysis',
+                'name': 'Multi-Chain Report',
                 'time': next_time.strftime('%Y-%m-%d %H:%M UTC'),
                 'timestamp': next_time
             })
