@@ -127,33 +127,33 @@ class BotCommandHandler:
         
         # Different messages for groups vs private chats
         if chat_type in ['group', 'supergroup']:
-            welcome_message = """🚀 <b>RAYDIUM POOL ANALYZER BOT</b>
+            welcome_message = """🚀 <b>MULTICHAIN POOL ANALYZER BOT</b>
 
-Бот настроен для работы в этой группе!
+Bot is configured for this group!
 
-<b>📱 Команды в группе:</b>
-Упоминайте бота: <code>@botname /command</code>
+<b>📱 Group Commands:</b>
+Mention the bot: <code>@botname /command</code>
 
 <b>Available Commands:</b>
-• /help - Помощь по командам
-• /status - Статус системы  
-• /run_analysis - Запустить анализ
-• /schedule - Расписание задач
-• /test - Тест функций
+• /help - Show help message
+• /status - System status  
+• /run_analysis - Trigger analysis
+• /schedule - View scheduled tasks
+• /test - Test functions
 
-<b>⚡️ Автоматические отчеты:</b>
-• 🔵 Ethereum позиции: Каждые 4 часа
-• 🔵 Base позиции: Каждые 4 часа (+2ч смещение)
-• 📊 DAO Pool снапшоты: 09:30 & 21:30 UTC
-• 🚀 Мультичейн отчеты: 12:00 & 20:00 UTC
-• 🔮 PHI Анализ: Воскресенье в 18:30 UTC
+<b>⚡️ Automated Reports:</b>
+• 🔵 Ethereum Positions: Every 4 hours
+• 🔵 Base Positions: Every 4 hours (+2h offset)
+• 📊 DAO Pool Snapshots: 09:30 & 21:30 UTC
+• 🚀 Multi-Chain Reports: 12:00 & 20:00 UTC
+• 🔮 PHI Analysis: Sunday at 18:30 UTC
 
-<b>🌐 Поддерживаемые сети:</b>
+<b>🌐 Supported Networks:</b>
 • 🟣 Solana (Raydium CLMM)
 • 🔵 Ethereum (Uniswap V3)
 • 🔵 Base (Uniswap V3)
 
-Все отчеты приходят в эту группу автоматически."""
+All reports are sent to this group automatically."""
         else:
             welcome_message = """🚀 <b>MULTICHAIN POOL ANALYZER BOT</b>
 
@@ -191,31 +191,31 @@ The bot will automatically send analysis reports to this chat."""
             return
         
         if chat_type in ['group', 'supergroup']:
-            help_message = """🆘 <b>ПОМОЩЬ ПО КОМАНДАМ БОТА</b>
+            help_message = """🆘 <b>BOT COMMANDS HELP</b>
 
-<b>📱 В группе упоминайте бота:</b>
+<b>📱 In groups mention the bot:</b>
 <code>@botname /command</code>
 
-<b>📊 Команды анализа:</b>
-• <code>@botname /run_analysis</code> - Запустить анализ
-• <code>@botname /schedule</code> - Расписание задач
+<b>📊 Analysis Commands:</b>
+• <code>@botname /run_analysis</code> - Trigger analysis
+• <code>@botname /schedule</code> - View scheduled tasks
 
-<b>🔧 Системные команды:</b>
-• <code>@botname /status</code> - Статус системы
-• <code>@botname /test</code> - Тест подключения
+<b>🔧 System Commands:</b>
+• <code>@botname /status</code> - System status
+• <code>@botname /test</code> - Test connection
 
-<b>ℹ️ Информационные команды:</b>
-• <code>@botname /help</code> - Эта помощь
-• <code>@botname /start</code> - Приветствие
+<b>ℹ️ Information Commands:</b>
+• <code>@botname /help</code> - This help
+• <code>@botname /start</code> - Welcome message
 
-<b>🤖 Автоматические функции:</b>
-• Ежедневные отчеты по пулам
-• Еженедельный PHI AI анализ  
-• Уведомления об ошибках
-• Алерты изменений портфеля (>5%)
+<b>🤖 Automated Functions:</b>
+• Multi-chain position reports  
+• Weekly PHI AI analysis
+• Error notifications
+• Portfolio change alerts (>5%)
 
-<b>⚠️ Важно:</b>
-Бот должен быть администратором группы ИЛИ команды нужно отправлять с упоминанием @botname"""
+<b>⚠️ Important:</b>
+Bot must be a group admin OR commands must be sent with @botname mention"""
         else:
             help_message = """🆘 <b>BOT COMMANDS HELP</b>
 
