@@ -111,7 +111,8 @@ class RaydiumScheduler:
             name="Solana Positions Analysis",
             cron_expression="0 0,4,8,12,16,20 * * *",  # 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC
             function=self.run_pool_analysis,
-            description="Solana Raydium CLMM positions monitoring"
+            description="Solana Raydium CLMM positions monitoring",
+            enabled=False  # ОТКЛЮЧЕНО: пользователь не хочет получать частые отчеты Solana
         )
         
         # Ethereum positions - every 4 hours at :20 (20 min after Solana)
@@ -119,7 +120,8 @@ class RaydiumScheduler:
             name="Ethereum Positions Analysis",
             cron_expression="20 0,4,8,12,16,20 * * *",  # 00:20, 04:20, 08:20, 12:20, 16:20, 20:20 UTC
             function=self.run_ethereum_positions_analysis,
-            description="Ethereum Uniswap v3 positions monitoring"
+            description="Ethereum Uniswap v3 positions monitoring",
+            enabled=False  # ОТКЛЮЧЕНО: пользователь не хочет получать отладочные сообщения
         )
         
         # Base positions - every 4 hours at :40 (40 min after Solana)
@@ -127,7 +129,8 @@ class RaydiumScheduler:
             name="Base Positions Analysis", 
             cron_expression="40 0,4,8,12,16,20 * * *",  # 00:40, 04:40, 08:40, 12:40, 16:40, 20:40 UTC
             function=self.run_base_positions_analysis,
-            description="Base Uniswap v3 positions monitoring"
+            description="Base Uniswap v3 positions monitoring",
+            enabled=False  # ОТКЛЮЧЕНО: пользователь не хочет получать частые отчеты Base
         )
         
         # DAO Pools Snapshots - every 4 hours at :10 (70 min after Solana start)
@@ -622,7 +625,7 @@ class RaydiumScheduler:
     # === НОВЫЕ МУЛЬТИ-ЧЕЙН ФУНКЦИИ ===
     
 
-
+    
     async def run_ethereum_positions_analysis(self):
         """Execute Ethereum positions analysis"""
         try:
