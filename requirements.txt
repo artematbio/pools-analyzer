@@ -48,4 +48,4 @@ eth-typing>=3.5.0
 eth-utils>=2.3.0
 
 # Decimal precision for financial calculations
-decimal>=1.0.0 
+# decimal - built-in Python module, no need to install 
