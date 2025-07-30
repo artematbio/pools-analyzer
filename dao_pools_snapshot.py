@@ -672,6 +672,9 @@ class DAOPoolsSnapshotGenerator:
         virtual_bio_pairs = self._create_virtual_bio_pairs(dao_tokens, bio_price, all_pool_snapshots)
         all_pool_snapshots.extend(virtual_bio_pairs)
         
+        # 🔧 НОРМАЛИЗАЦИЯ FDV: применяем максимальный FDV для каждого токена на всех чейнах
+        all_pool_snapshots = self._normalize_fdv_across_chains(all_pool_snapshots)
+        
         # Рассчитываем исторические изменения для каждого токена
         print(f"\n📊 Рассчитываем исторические изменения...")
         
@@ -858,6 +861,55 @@ class DAOPoolsSnapshotGenerator:
         
         print(f"   ✅ Создано {len(virtual_pairs)} виртуальных BIO пар")
         return virtual_pairs
+    
+    def _normalize_fdv_across_chains(self, snapshots: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Нормализация FDV: применяем максимальный FDV для каждого токена на всех чейнах
+        У одного токена должен быть единый глобальный FDV независимо от чейна
+        """
+        print(f"\n🔧 Нормализация FDV по токенам...")
+        
+        # Группируем по токенам и находим максимальный FDV
+        token_max_fdv = {}
+        for snapshot in snapshots:
+            token_symbol = snapshot.get('token_symbol', '')
+            token_fdv = snapshot.get('token_fdv_usd', 0)
+            
+            if token_symbol and token_fdv > 0:
+                if token_symbol not in token_max_fdv or token_fdv > token_max_fdv[token_symbol]:
+                    token_max_fdv[token_symbol] = token_fdv
+        
+        # Применяем максимальный FDV ко всем снапшотам токена и пересчитываем target/gap
+        updated_snapshots = []
+        for snapshot in snapshots:
+            token_symbol = snapshot.get('token_symbol', '')
+            
+            if token_symbol in token_max_fdv:
+                old_fdv = snapshot.get('token_fdv_usd', 0)
+                max_fdv = token_max_fdv[token_symbol]
+                
+                # Обновляем FDV
+                snapshot['token_fdv_usd'] = max_fdv
+                
+                # Пересчитываем target LP value для BIO пар
+                if snapshot.get('is_bio_pair', False) and max_fdv > 0:
+                    new_target_lp = max_fdv * (self.target_fdv_percentage / 100)
+                    snapshot['target_lp_value_usd'] = new_target_lp
+                    
+                    # Пересчитываем gap
+                    our_position = snapshot.get('our_position_value_usd', 0)
+                    snapshot['lp_gap_usd'] = new_target_lp - our_position
+                
+                # Логируем изменения
+                if old_fdv != max_fdv and old_fdv > 0:
+                    print(f"   🔄 {token_symbol}: FDV ${old_fdv:,.0f} → ${max_fdv:,.0f} (унификация)")
+                elif old_fdv == 0 and max_fdv > 0:
+                    print(f"   ✅ {token_symbol}: FDV ${max_fdv:,.0f} (применен глобальный)")
+            
+            updated_snapshots.append(snapshot)
+        
+        print(f"   ✅ Обработано {len(token_max_fdv)} токенов с глобальным FDV")
+        return updated_snapshots
     
     def _get_network_stats(self, snapshots: List[Dict[str, Any]]) -> str:
         """Получить статистику по сетям"""
