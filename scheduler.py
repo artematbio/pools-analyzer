@@ -138,7 +138,8 @@ class RaydiumScheduler:
             name="DAO Pools Snapshots",
             cron_expression="10 1,5,9,13,17,21 * * *",  # 01:10, 05:10, 09:10, 13:10, 17:10, 21:10 UTC
             function=self.run_dao_pools_snapshots,
-            description="Collect snapshots of all DAO pools after fresh position data"
+            description="Collect snapshots of all DAO pools after fresh position data",
+            enabled=False  # ОТКЛЮЧЕНО: пользователь не хочет получать DAO SNAPSHOT уведомления
         )
         
         # ===== ОТЧЕТЫ НА ОСНОВЕ СВЕЖИХ ДАННЫХ =====
@@ -156,7 +157,8 @@ class RaydiumScheduler:
             name="Token Data Refresh",
             cron_expression="0 8 * * *",  # 08:00 UTC daily
             function=self.run_token_data_refresh,
-            description="Refresh token metadata from CoinGecko"
+            description="Refresh token metadata from CoinGecko",
+            enabled=False  # ОТКЛЮЧЕНО: файл get_token_data.py не существует
         )
         
         # PHI analysis - weekly on Sunday

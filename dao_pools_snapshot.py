@@ -905,34 +905,57 @@ class DAOPoolsSnapshotGenerator:
         try:
             print(f"💾 Сохраняем {len(snapshots)} снапшотов в Supabase...")
             
-            # Очищаем записи ТОЛЬКО за сегодня (точный диапазон дня)
+            # UPSERT логика: обновляем данные за сегодня, сохраняем историю
             today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-            today_start = f'{today}T00:00:00Z'
-            today_end = f'{today}T23:59:59.999Z'
             
-            delete_result = supabase_handler.client.table('dao_pool_snapshots').delete().gte('created_at', today_start).lte('created_at', today_end).execute()
-            print(f"   🗑️ Удалено записей за сегодня ({today}): {len(delete_result.data) if delete_result.data else 0}")
-            print(f"   📊 Исторические данные других дней сохранены")
+            # Проверяем, есть ли уже записи за сегодня
+            existing_today = supabase_handler.client.table('dao_pool_snapshots').select('id, pool_id').gte('created_at', f'{today}T00:00:00Z').lte('created_at', f'{today}T23:59:59.999Z').execute()
             
-            # Добавляем created_at для каждой записи
-            for snapshot in snapshots:
-                snapshot['created_at'] = datetime.now(timezone.utc).isoformat()
-            
-            # Сохраняем батчами по 100
-            batch_size = 100
-            success_count = 0
-            
-            for i in range(0, len(snapshots), batch_size):
-                batch = snapshots[i:i + batch_size]
-                result = supabase_handler.client.table('dao_pool_snapshots').insert(batch).execute()
+            if existing_today.data:
+                print(f"   🔄 Найдено {len(existing_today.data)} записей за сегодня ({today}) - обновляем")
                 
-                if result.data:
-                    success_count += len(result.data)
-                else:
-                    print(f"   ⚠️ Ошибка сохранения батча {i // batch_size + 1}")
+                # Создаём mapping существующих записей по pool_id
+                existing_pools = {record['pool_id']: record['id'] for record in existing_today.data}
+                
+                success_count = 0
+                for snapshot in snapshots:
+                    snapshot['created_at'] = datetime.now(timezone.utc).isoformat()
+                    pool_id = snapshot.get('pool_id')
+                    
+                    if pool_id in existing_pools:
+                        # Обновляем существующую запись
+                        result = supabase_handler.client.table('dao_pool_snapshots').update(snapshot).eq('id', existing_pools[pool_id]).execute()
+                        if result.data:
+                            success_count += 1
+                    else:
+                        # Создаём новую запись (новый пул)
+                        result = supabase_handler.client.table('dao_pool_snapshots').insert(snapshot).execute()
+                        if result.data:
+                            success_count += 1
+                            
+            else:
+                print(f"   ✨ Записей за сегодня ({today}) нет - создаём новые")
+                
+                # Добавляем created_at для каждой записи
+                for snapshot in snapshots:
+                    snapshot['created_at'] = datetime.now(timezone.utc).isoformat()
+                
+                # Сохраняем батчами по 100
+                batch_size = 100
+                success_count = 0
+                
+                for i in range(0, len(snapshots), batch_size):
+                    batch = snapshots[i:i + batch_size]
+                    result = supabase_handler.client.table('dao_pool_snapshots').insert(batch).execute()
+                    
+                    if result.data:
+                        success_count += len(result.data)
+                    else:
+                        print(f"   ⚠️ Ошибка сохранения батча {i // batch_size + 1}")
             
-            print(f"   ✅ Успешно сохранено {success_count} из {len(snapshots)} записей")
-            print(f"   📈 Режим: Историческая коллекция (одна запись за день)")
+            print(f"   ✅ Успешно обработано {success_count} из {len(snapshots)} записей")
+            print(f"   📈 Режим: Историческая коллекция (UPSERT по дням)")
+            print(f"   📊 Views используют актуальные данные за {today}")
             return success_count > 0
             
         except Exception as e:
@@ -1152,6 +1175,7 @@ class DAOPoolsSnapshotGenerator:
                 pool_response = await client.get(pool_url, timeout=20)
                 
                 current_price = best_pool['price']  # Fallback к цене из snapshot
+                original_price = best_pool['price']  # Сохраняем оригинальную цену
                 
                 # Используем правильный FDV из dao_tokens (максимальный из всех сетей)
                 current_fdv = dao_tokens.get(token_symbol, {}).get('fdv_usd', 0)
@@ -1164,14 +1188,19 @@ class DAOPoolsSnapshotGenerator:
                     api_price = float(attrs.get('base_token_price_usd', 0))
                     if api_price > 0:
                         current_price = api_price
-                        print(f"   📊 {token_symbol}: актуальная цена ${current_price:.6f} (было ${best_pool['price']:.6f})")
+                        if abs(current_price - original_price) > 0.000001:  # Цена действительно изменилась
+                            print(f"   📊 {token_symbol}: актуальная цена ${current_price:.6f} (было ${original_price:.6f})")
+                        else:
+                            print(f"   📊 {token_symbol}: актуальная цена ${current_price:.6f} (без изменений)")
+                    else:
+                        print(f"   📊 {token_symbol}: используем цену из snapshot ${current_price:.6f}")
                     
                     # FDV не берем из API пула (неточно), используем уже рассчитанный
                 elif pool_response.status_code == 429:
                     rate_limit_count += 1
-                    print(f"   ⚠️ {token_symbol}: Rate limit для API пула, используем цену из snapshot")
+                    print(f"   ⚠️ {token_symbol}: Rate limit для API пула, используем цену из snapshot ${current_price:.6f}")
                 else:
-                    print(f"   ⚠️ {token_symbol}: API пула недоступен ({pool_response.status_code}), используем цену из snapshot")
+                    print(f"   ⚠️ {token_symbol}: API пула недоступен ({pool_response.status_code}), используем цену из snapshot ${current_price:.6f}")
                 
                 # Получаем OHLCV данные для лучшего пула
                 ohlcv_data = await self.fetch_token_ohlcv_data(
