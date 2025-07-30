@@ -6,7 +6,7 @@ Database Handler for Supabase Integration
 import os
 import logging
 from typing import Dict, List, Optional, Any, Union
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 import json
 
@@ -139,6 +139,82 @@ class SupabaseHandler:
         except Exception as e:
             logging.error(f"❌ Ошибка сохранения цены токена: {e}")
             return None
+    
+    def save_token_price_history(self, price_history_data: Dict[str, Any]) -> bool:
+        """Сохранить исторические данные цен токена (UPSERT)"""
+        if not self.is_connected():
+            print("⚠️ Supabase не подключен для сохранения истории цен")
+            return False
+        
+        try:
+            # UPSERT логика: обновляем если существует, создаем если нет
+            result = self.client.table('token_price_history').upsert(
+                price_history_data,
+                on_conflict='token_symbol,network'
+            ).execute()
+            
+            if result.data:
+                token_symbol = price_history_data.get('token_symbol', 'Unknown')
+                network = price_history_data.get('network', 'Unknown')
+                price_24h = price_history_data.get('price_change_24h_percent')
+                price_7d = price_history_data.get('price_change_7d_percent')
+                
+                # Безопасное форматирование - заменяем None на 'N/A'
+                price_24h_str = f"{price_24h:+.2f}" if price_24h is not None else "N/A"
+                price_7d_str = f"{price_7d:+.2f}" if price_7d is not None else "N/A"
+                
+                print(f"✅ История цен {token_symbol} ({network}): 24h={price_24h_str}%, 7d={price_7d_str}%")
+                return True
+            else:
+                print(f"⚠️ Не удалось сохранить историю цен: {price_history_data}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Ошибка сохранения истории цен: {e}")
+            return False
+    
+    def get_token_price_history(self, token_symbol: str, network: str = None) -> Optional[Dict[str, Any]]:
+        """Получить историю цен токена"""
+        if not self.is_connected():
+            return None
+        
+        try:
+            query = self.client.table('token_price_history').select('*').eq('token_symbol', token_symbol)
+            
+            if network:
+                query = query.eq('network', network)
+            
+            result = query.order('last_updated', desc=True).limit(1).execute()
+            
+            if result.data:
+                return result.data[0]
+            return None
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения истории цен для {token_symbol}: {e}")
+            return None
+
+    def cleanup_old_price_history(self, days_to_keep: int = 30) -> int:
+        """Очистка старых записей истории цен (старше N дней)"""
+        if not self.is_connected():
+            return 0
+        
+        try:
+            cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days_to_keep)).isoformat()
+            
+            result = self.client.table('token_price_history').delete().lt(
+                'last_updated', cutoff_date
+            ).execute()
+            
+            deleted_count = len(result.data) if result.data else 0
+            if deleted_count > 0:
+                print(f"🧹 Удалено {deleted_count} старых записей истории цен")
+            
+            return deleted_count
+            
+        except Exception as e:
+            print(f"❌ Ошибка очистки истории цен: {e}")
+            return 0
     
     # === TREASURY TRANSACTIONS ===
     def save_treasury_transaction(self, tx_data: Dict[str, Any]) -> Optional[str]:

@@ -10,6 +10,7 @@ from decimal import Decimal, getcontext
 import sys
 import os
 import time
+from datetime import datetime
 
 # Добавляем пути для импортов
 sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
@@ -364,8 +365,21 @@ async def get_uniswap_positions(
                         method_name = "RPC" if network in ["base", "ethereum"] else "Subgraph"
                         logger.info(f"✅ Pool {pool_addr[:8]}...: TVL = ${tvl_usd:,.0f} ({method_name})")
                         
+                        # 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Обновляем TVL в уже сохраненном пуле
+                        if SUPABASE_ENABLED and tvl_usd > 0:
+                            try:
+                                # Обновляем TVL данные в базе
+                                pool_update_data = {
+                                    'tvl_usd': tvl_usd,
+                                    'last_updated': datetime.now().isoformat()
+                                }
+                                await update_ethereum_pool_tvl(pool_addr, pool_update_data, network)
+                            except Exception as e:
+                                logger.warning(f"⚠️ Не удалось обновить TVL пула {pool_addr[:8]}...: {e}")
+                        
                     method_name = "RPC" if network in ["base", "ethereum"] else "Subgraph"
                     logger.info(f"📊 Получены TVL данные для {len(pool_tvl_data)} пулов через {method_name}")
+                    logger.info(f"💾 TVL данные обновлены в lp_pool_snapshots для {network}")
                         
                 except Exception as e:
                     logger.warning(f"⚠️ Не удалось получить TVL через Subgraph: {e}")
@@ -1743,6 +1757,28 @@ async def save_ethereum_pool_to_supabase(pool_data: Dict[str, Any], network: str
         
     except Exception as e:
         print(f"❌ Ошибка сохранения пула {network} в Supabase: {e}")
+        return False
+
+async def update_ethereum_pool_tvl(pool_address: str, update_data: Dict[str, Any], network: str) -> bool:
+    """Обновить TVL пула в lp_pool_snapshots"""
+    try:
+        if not SUPABASE_ENABLED or not supabase_handler or not supabase_handler.is_connected():
+            return False
+            
+        # Обновляем последнюю запись пула
+        result = supabase_handler.client.table('lp_pool_snapshots').update(update_data).eq(
+            'pool_address', pool_address
+        ).eq('network', network).order('created_at', desc=True).limit(1).execute()
+        
+        if result.data:
+            logger.info(f"✅ TVL обновлен для пула {pool_address[:8]}...: ${update_data['tvl_usd']:,.0f}")
+            return True
+        else:
+            logger.warning(f"⚠️ Не найден пул для обновления TVL: {pool_address}")
+            return False
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка обновления TVL пула {pool_address}: {e}")
         return False
 
 

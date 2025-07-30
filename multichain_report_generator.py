@@ -329,27 +329,25 @@ class MultiChainReportGenerator:
                     # Извлекаем ID из ethereum_xxxxx формата
                     pos['token_id'] = pos['position_mint'].replace('ethereum_', '')
                 
-                # Получаем TVL пула из таблицы пулов (берем запись с максимальным TVL)
+                # Получаем TVL пула из таблицы пулов (исправлен поиск)
                 try:
-                    pool_data = supabase_handler.client.table('lp_pool_snapshots').select('tvl_usd').eq(
-                        'pool_address', pos['pool_id']  # Ищем по pool_address, не pool_id
-                    ).eq('network', 'ethereum').gte('tvl_usd', 1000).order('tvl_usd', desc=True).limit(1).execute()
+                    # Упрощенный поиск без строгих фильтров TVL
+                    pool_data = supabase_handler.client.table('lp_pool_snapshots').select('tvl_usd, pool_name').eq(
+                        'pool_address', pos['pool_id']  # Ищем по pool_address
+                    ).eq('network', 'ethereum').order('created_at', desc=True).limit(1).execute()
                     
                     if pool_data.data:
-                        pos['pool_tvl_usd'] = pool_data.data[0]['tvl_usd']
-                        print(f"   ✅ ETH TVL найден: {pos.get('pool_name', 'Unknown')} = ${pos['pool_tvl_usd']:,.0f}")
-                    else:
-                        # Fallback: берем любую запись с ненулевым TVL
-                        pool_data_fallback = supabase_handler.client.table('lp_pool_snapshots').select('tvl_usd').eq(
-                            'pool_address', pos['pool_id']
-                        ).eq('network', 'ethereum').gt('tvl_usd', 0).order('created_at', desc=True).limit(1).execute()
-                        
-                        if pool_data_fallback.data:
-                            pos['pool_tvl_usd'] = pool_data_fallback.data[0]['tvl_usd']
-                            print(f"   ⚠️ ETH TVL (fallback): {pos.get('pool_name', 'Unknown')} = ${pos['pool_tvl_usd']:,.0f}")
+                        tvl_value = pool_data.data[0]['tvl_usd']
+                        pos['pool_tvl_usd'] = tvl_value if tvl_value is not None else 0
+                        if pos['pool_tvl_usd'] > 0:
+                            print(f"   ✅ ETH TVL найден: {pos.get('pool_name', 'Unknown')} = ${pos['pool_tvl_usd']:,.0f}")
                         else:
-                            pos['pool_tvl_usd'] = 0
-                            print(f"   ❌ ETH TVL не найден: {pos.get('pool_name', 'Unknown')}")
+                            print(f"   ⚠️ ETH TVL найден, но равен 0: {pos.get('pool_name', 'Unknown')}")
+                    else:
+                        pos['pool_tvl_usd'] = 0
+                        print(f"   ❌ ETH TVL не найден в lp_pool_snapshots: {pos.get('pool_name', 'Unknown')}")
+                        print(f"       Ищем pool_address: {pos['pool_id']}")
+                        
                 except Exception as e:
                     print(f"⚠️ Ошибка получения TVL для Ethereum пула {pos.get('pool_id', 'Unknown')}: {e}")
                     pos['pool_tvl_usd'] = 0
@@ -433,27 +431,25 @@ class MultiChainReportGenerator:
                     # Извлекаем ID из base_xxxxx формата
                     pos['token_id'] = pos['position_mint'].replace('base_', '')
                 
-                # Получаем TVL пула из таблицы пулов (берем запись с максимальным TVL)
+                # Получаем TVL пула из таблицы пулов (исправлен поиск)
                 try:
-                    pool_data = supabase_handler.client.table('lp_pool_snapshots').select('tvl_usd').eq(
-                        'pool_address', pos['pool_id']  # Ищем по pool_address, не pool_id
-                    ).eq('network', 'base').gte('tvl_usd', 1000).order('tvl_usd', desc=True).limit(1).execute()
+                    # Упрощенный поиск без строгих фильтров TVL
+                    pool_data = supabase_handler.client.table('lp_pool_snapshots').select('tvl_usd, pool_name').eq(
+                        'pool_address', pos['pool_id']  # Ищем по pool_address
+                    ).eq('network', 'base').order('created_at', desc=True).limit(1).execute()
                     
                     if pool_data.data:
-                        pos['pool_tvl_usd'] = pool_data.data[0]['tvl_usd']
-                        print(f"   ✅ BASE TVL найден: {pos.get('pool_name', 'Unknown')} = ${pos['pool_tvl_usd']:,.0f}")
-                    else:
-                        # Fallback: берем любую запись с ненулевым TVL
-                        pool_data_fallback = supabase_handler.client.table('lp_pool_snapshots').select('tvl_usd').eq(
-                            'pool_address', pos['pool_id']
-                        ).eq('network', 'base').gt('tvl_usd', 0).order('created_at', desc=True).limit(1).execute()
-                        
-                        if pool_data_fallback.data:
-                            pos['pool_tvl_usd'] = pool_data_fallback.data[0]['tvl_usd']
-                            print(f"   ⚠️ BASE TVL (fallback): {pos.get('pool_name', 'Unknown')} = ${pos['pool_tvl_usd']:,.0f}")
+                        tvl_value = pool_data.data[0]['tvl_usd']
+                        pos['pool_tvl_usd'] = tvl_value if tvl_value is not None else 0
+                        if pos['pool_tvl_usd'] > 0:
+                            print(f"   ✅ BASE TVL найден: {pos.get('pool_name', 'Unknown')} = ${pos['pool_tvl_usd']:,.0f}")
                         else:
-                            pos['pool_tvl_usd'] = 0
-                            print(f"   ❌ BASE TVL не найден: {pos.get('pool_name', 'Unknown')}")
+                            print(f"   ⚠️ BASE TVL найден, но равен 0: {pos.get('pool_name', 'Unknown')}")
+                    else:
+                        pos['pool_tvl_usd'] = 0
+                        print(f"   ❌ BASE TVL не найден в lp_pool_snapshots: {pos.get('pool_name', 'Unknown')}")
+                        print(f"       Ищем pool_address: {pos['pool_id']}")
+                        
                 except Exception as e:
                     print(f"⚠️ Ошибка получения TVL для Base пула {pos.get('pool_id', 'Unknown')}: {e}")
                     pos['pool_tvl_usd'] = 0
