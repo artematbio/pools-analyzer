@@ -453,13 +453,14 @@ class DAOPoolsSnapshotGenerator:
         
         url = f'https://api.geckoterminal.com/api/v2/networks/{network_id}/pools/{pool_address}'
         
-        # Retry логика для 429 ошибок
-        max_retries = 3
-        base_delay = 2.0  # Увеличенная базовая задержка
+        # Retry логика с бесконечными попытками до успеха для rate limits
+        base_delay = 2.0
+        rate_limit_attempts = 0
+        error_attempts = 0
         
-        for attempt in range(max_retries):
+        while True:
             try:
-                response = await client.get(url, timeout=20)  # Увеличенный timeout
+                response = await client.get(url, timeout=20)
                 
                 if response.status_code == 200:
                     data = response.json()
@@ -490,23 +491,12 @@ class DAOPoolsSnapshotGenerator:
                     return updated_pool
                     
                 elif response.status_code == 429:
-                    # Rate limiting - retry с экспоненциальной задержкой
-                    if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
-                        print(f"      🔄 {pool_info['pool_name']} ({network}): Rate limit, retry {attempt + 1}/{max_retries} через {delay}s")
-                        await asyncio.sleep(delay)
-                        continue
-                    else:
-                        print(f"      ⚠️ {pool_info['pool_name']} ({network}): Rate limit после {max_retries} попыток - сохраняем с API_ERROR")
-                        # Сохраняем пул с меткой что данные недоступны из-за API ошибки
-                        updated_pool = pool_info.copy()
-                        updated_pool.update({
-                            'tvl_usd': 0,
-                            'volume_24h_usd': 0,
-                            'dex': 'api_error_429',  # Метка что это ошибка API
-                            'fee_percent': 0,
-                        })
-                        return updated_pool
+                    # Rate limiting - продолжаем попытки до успеха
+                    rate_limit_attempts += 1
+                    delay = min(base_delay * (1.5 ** rate_limit_attempts), 30.0)  # Максимум 30 сек
+                    print(f"      🔄 {pool_info['pool_name']} ({network}): Rate limit, попытка {rate_limit_attempts} через {delay:.1f}s")
+                    await asyncio.sleep(delay)
+                    continue
                         
                 elif response.status_code == 404:
                     print(f"      ⚠️ {pool_info['pool_name']} ({network}): Пул не найден (404) - ПРОПУСКАЕМ")
@@ -525,13 +515,15 @@ class DAOPoolsSnapshotGenerator:
                     return updated_pool
                     
             except Exception as e:
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    print(f"      🔄 {pool_info['pool_name']} ({network}): Ошибка {e}, retry {attempt + 1}/{max_retries} через {delay}s")
+                # Для критических ошибок (не rate limit) пробуем ограниченное количество раз
+                error_attempts += 1
+                if error_attempts <= 5:  # Максимум 5 попыток для обычных ошибок
+                    delay = min(base_delay * (1.5 ** error_attempts), 15.0)
+                    print(f"      🔄 {pool_info['pool_name']} ({network}): Ошибка {e}, попытка {error_attempts} через {delay:.1f}s")
                     await asyncio.sleep(delay)
                     continue
                 else:
-                    print(f"      ❌ {pool_info['pool_name']} ({network}): Ошибка после {max_retries} попыток: {e} - сохраняем с API_ERROR")
+                    print(f"      ❌ {pool_info['pool_name']} ({network}): Ошибка после {error_attempts} попыток: {e} - сохраняем с API_ERROR")
                     # Сохраняем пул с меткой что данные недоступны из-за ошибки
                     updated_pool = pool_info.copy()
                     updated_pool.update({
@@ -938,22 +930,22 @@ class DAOPoolsSnapshotGenerator:
             today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
             
             # Проверяем, есть ли уже записи за сегодня
-            existing_today = supabase_handler.client.table('dao_pool_snapshots').select('id, pool_id').gte('created_at', f'{today}T00:00:00Z').lte('created_at', f'{today}T23:59:59.999Z').execute()
+            existing_today = supabase_handler.client.table('dao_pool_snapshots').select('id, pool_address').gte('created_at', f'{today}T00:00:00Z').lte('created_at', f'{today}T23:59:59.999Z').execute()
             
             if existing_today.data:
                 print(f"   🔄 Найдено {len(existing_today.data)} записей за сегодня ({today}) - обновляем")
                 
-                # Создаём mapping существующих записей по pool_id
-                existing_pools = {record['pool_id']: record['id'] for record in existing_today.data}
+                # Создаём mapping существующих записей по pool_address
+                existing_pools = {record['pool_address']: record['id'] for record in existing_today.data}
                 
                 success_count = 0
                 for snapshot in snapshots:
                     snapshot['created_at'] = datetime.now(timezone.utc).isoformat()
-                    pool_id = snapshot.get('pool_id')
+                    pool_address = snapshot.get('pool_address')
                     
-                    if pool_id in existing_pools:
+                    if pool_address in existing_pools:
                         # Обновляем существующую запись
-                        result = supabase_handler.client.table('dao_pool_snapshots').update(snapshot).eq('id', existing_pools[pool_id]).execute()
+                        result = supabase_handler.client.table('dao_pool_snapshots').update(snapshot).eq('id', existing_pools[pool_address]).execute()
                         if result.data:
                             success_count += 1
                     else:
@@ -1002,11 +994,12 @@ class DAOPoolsSnapshotGenerator:
         network_id = network_map.get(network, network)
         url = f'https://api.geckoterminal.com/api/v2/networks/{network_id}/pools/{pool_address}/ohlcv/day?limit=8'
         
-        # Retry логика для rate limits
-        max_retries = 3
+        # Retry логика с продолжением попыток до успеха для rate limits
         base_delay = 2.0
+        rate_limit_attempts = 0
+        error_attempts = 0
         
-        for attempt in range(max_retries):
+        while True:
             try:
                 response = await client.get(url, timeout=20)
                 
@@ -1025,23 +1018,22 @@ class DAOPoolsSnapshotGenerator:
                         print(f"   ⚠️ Недостаточно OHLCV данных для {pool_address} ({network}): {len(ohlcv_list)} дней")
                         return None
                         
-                elif response.status_code == 429:  # Rate limit
-                    delay = base_delay * (2 ** attempt)  # Exponential backoff
-                    if attempt < max_retries - 1:
-                        print(f"   🔄 OHLCV Rate limit для {pool_address}, retry {attempt + 1}/{max_retries} через {delay}s")
-                        await asyncio.sleep(delay)
-                        continue
-                    else:
-                        print(f"   ⚠️ OHLCV Rate limit для {pool_address} после {max_retries} попыток")
-                        return None
+                elif response.status_code == 429:  # Rate limit - продолжаем до успеха
+                    rate_limit_attempts += 1
+                    delay = min(base_delay * (1.5 ** rate_limit_attempts), 30.0)  # Максимум 30 сек
+                    print(f"   🔄 OHLCV Rate limit для {pool_address}, попытка {rate_limit_attempts} через {delay:.1f}s")
+                    await asyncio.sleep(delay)
+                    continue
                 else:
                     print(f"   ⚠️ OHLCV API error для {pool_address}: {response.status_code}")
                     return None
                     
             except Exception as e:
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    print(f"   🔄 OHLCV ошибка для {pool_address}, retry {attempt + 1}/{max_retries} через {delay}s: {e}")
+                # Для критических ошибок пробуем ограниченное количество раз
+                error_attempts += 1
+                if error_attempts <= 5:  # Максимум 5 попыток для обычных ошибок
+                    delay = min(base_delay * (1.5 ** error_attempts), 15.0)
+                    print(f"   🔄 OHLCV ошибка для {pool_address}, попытка {error_attempts} через {delay:.1f}s: {e}")
                     await asyncio.sleep(delay)
                     continue
                 else:
