@@ -339,14 +339,48 @@ class DAOPoolsSnapshotGenerator:
                             data = response.json()
                             attrs = data.get('data', {}).get('attributes', {})
                             
-                            fdv_usd = attrs.get('fdv_usd')
+                            # Получаем цену и supply данные
                             price_usd = attrs.get('price_usd')
+                            max_supply = attrs.get('max_supply')  
+                            total_supply = attrs.get('normalized_total_supply')  # Используем нормализованное значение
                             
-                            if fdv_usd and float(fdv_usd) > best_fdv:
-                                best_fdv = float(fdv_usd)
+                            # Рассчитываем FDV по формуле вместо использования готового fdv_usd
+                            calculated_fdv = 0
+                            if price_usd:
+                                price = float(price_usd)
+                                
+                                # FDV = price × max_supply, если max_supply есть
+                                if max_supply and max_supply != "0":
+                                    supply_for_fdv = float(max_supply)
+                                    calculated_fdv = price * supply_for_fdv
+                                    supply_source = "max_supply"
+                                # Иначе FDV = price × total_supply
+                                elif total_supply:
+                                    supply_for_fdv = float(total_supply)
+                                    calculated_fdv = price * supply_for_fdv
+                                    supply_source = "total_supply"
+                                else:
+                                    # Fallback: пробуем raw total_supply
+                                    raw_total_supply = attrs.get('total_supply')
+                                    decimals = attrs.get('decimals', 18)
+                                    if raw_total_supply:
+                                        supply_for_fdv = float(raw_total_supply) / (10 ** decimals)
+                                        calculated_fdv = price * supply_for_fdv
+                                        supply_source = "raw_total_supply"
+                            
+                            if calculated_fdv > best_fdv:
+                                best_fdv = calculated_fdv
                                 best_network = network
                                 if price_usd:
                                     best_price = float(price_usd)
+                                
+                                # API FDV для сравнения (опционально для отладки)
+                                api_fdv = attrs.get('fdv_usd', 0)
+                                if api_fdv:
+                                    fdv_diff = abs(calculated_fdv - float(api_fdv)) / float(api_fdv) * 100
+                                    print(f"   🧮 {token_symbol} ({network}): Calculated FDV ${calculated_fdv:,.0f} vs API FDV ${float(api_fdv):,.0f} (diff: {fdv_diff:.1f}%, source: {supply_source})")
+                                else:
+                                    print(f"   🧮 {token_symbol} ({network}): Calculated FDV ${calculated_fdv:,.0f} (source: {supply_source})")
                         
                         # Задержка между запросами
                         await asyncio.sleep(0.3)

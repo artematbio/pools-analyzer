@@ -1838,6 +1838,7 @@ async def duplicate_token_prices_to_supabase(token_prices: Dict[str, Decimal], s
 async def get_token_market_cap_geckoterminal(token_address: str, client: httpx.AsyncClient, network: str = "solana") -> float:
     """
     Получает market cap токена через GeckoTerminal API (fallback)
+    Теперь рассчитывает FDV по формуле: price × max_supply (или total_supply если max_supply == null)
     """
     try:
         url = f"https://api.geckoterminal.com/api/v2/networks/{network}/tokens/{token_address}"
@@ -1850,16 +1851,48 @@ async def get_token_market_cap_geckoterminal(token_address: str, client: httpx.A
         data = response.json()
         token_data = data.get("data", {}).get("attributes", {})
         
-        # Пробуем market_cap_usd, если нет - используем fdv_usd
-        market_cap = token_data.get("market_cap_usd")
-        if market_cap is None:
-            market_cap = token_data.get("fdv_usd", 0)
+        # Получаем цену и supply данные
+        price_usd = token_data.get("price_usd")
+        max_supply = token_data.get("max_supply")
+        total_supply = token_data.get("normalized_total_supply")
         
-        if market_cap:
-            market_cap = float(market_cap)
+        if not price_usd:
+            return 0.0
+            
+        price = float(price_usd)
+        calculated_fdv = 0
+        
+        # FDV = price × max_supply, если max_supply есть и не равен 0
+        if max_supply and max_supply != "0":
+            supply_for_fdv = float(max_supply)
+            calculated_fdv = price * supply_for_fdv
+            supply_source = "max_supply"
+        # Иначе FDV = price × total_supply
+        elif total_supply:
+            supply_for_fdv = float(total_supply)
+            calculated_fdv = price * supply_for_fdv
+            supply_source = "total_supply"
+        else:
+            # Fallback: пробуем raw total_supply
+            raw_total_supply = token_data.get('total_supply')
+            decimals = token_data.get('decimals', 18)
+            if raw_total_supply:
+                supply_for_fdv = float(raw_total_supply) / (10 ** decimals)
+                calculated_fdv = price * supply_for_fdv
+                supply_source = "raw_total_supply"
+        
+        if calculated_fdv > 0:
             symbol = token_data.get("symbol", "Unknown")
-            print(f"[BACKGROUND] ✅ GeckoTerminal market cap for {symbol}: ${market_cap:,.0f}")
-            return market_cap
+            
+            # API FDV для сравнения (опционально для отладки)
+            api_fdv = token_data.get("fdv_usd")
+            if api_fdv:
+                fdv_diff = abs(calculated_fdv - float(api_fdv)) / float(api_fdv) * 100
+                print(f"[BACKGROUND] 🧮 GeckoTerminal {symbol}: Calculated FDV ${calculated_fdv:,.0f} vs API FDV ${float(api_fdv):,.0f} (diff: {fdv_diff:.1f}%, source: {supply_source})")
+            else:
+                print(f"[BACKGROUND] 🧮 GeckoTerminal {symbol}: Calculated FDV ${calculated_fdv:,.0f} (source: {supply_source})")
+            
+            return calculated_fdv
         else:
             return 0.0
             
