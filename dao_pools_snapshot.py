@@ -374,13 +374,8 @@ class DAOPoolsSnapshotGenerator:
                                 if price_usd:
                                     best_price = float(price_usd)
                                 
-                                # API FDV для сравнения (опционально для отладки)
-                                api_fdv = attrs.get('fdv_usd', 0)
-                                if api_fdv:
-                                    fdv_diff = abs(calculated_fdv - float(api_fdv)) / float(api_fdv) * 100
-                                    print(f"   🧮 {token_symbol} ({network}): Calculated FDV ${calculated_fdv:,.0f} vs API FDV ${float(api_fdv):,.0f} (diff: {fdv_diff:.1f}%, source: {supply_source})")
-                                else:
-                                    print(f"   🧮 {token_symbol} ({network}): Calculated FDV ${calculated_fdv:,.0f} (source: {supply_source})")
+                                # Краткая диагностика
+                                print(f"   ✅ {token_symbol} ({network}): FDV ${calculated_fdv:,.0f} (source: {supply_source})")
                         
                         # Задержка между запросами
                         await asyncio.sleep(0.3)

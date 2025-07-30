@@ -1883,15 +1883,7 @@ async def get_token_market_cap_geckoterminal(token_address: str, client: httpx.A
         
         if calculated_fdv > 0:
             symbol = token_data.get("symbol", "Unknown")
-            
-            # API FDV для сравнения (опционально для отладки)
-            api_fdv = token_data.get("fdv_usd")
-            if api_fdv:
-                fdv_diff = abs(calculated_fdv - float(api_fdv)) / float(api_fdv) * 100
-                print(f"[BACKGROUND] 🧮 GeckoTerminal {symbol}: Calculated FDV ${calculated_fdv:,.0f} vs API FDV ${float(api_fdv):,.0f} (diff: {fdv_diff:.1f}%, source: {supply_source})")
-            else:
-                print(f"[BACKGROUND] 🧮 GeckoTerminal {symbol}: Calculated FDV ${calculated_fdv:,.0f} (source: {supply_source})")
-            
+            print(f"[BACKGROUND] ✅ GeckoTerminal {symbol}: FDV ${calculated_fdv:,.0f} (source: {supply_source})")
             return calculated_fdv
         else:
             return 0.0
