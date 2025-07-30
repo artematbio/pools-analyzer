@@ -112,7 +112,7 @@ class RaydiumScheduler:
             cron_expression="0 0,4,8,12,16,20 * * *",  # 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC
             function=self.run_pool_analysis,
             description="Solana Raydium CLMM positions monitoring",
-            enabled=False  # ОТКЛЮЧЕНО: пользователь не хочет получать частые отчеты Solana
+            enabled=True  # ВКЛЮЧЕНО: сбор данных без Telegram уведомлений
         )
         
         # Ethereum positions - every 4 hours at :20 (20 min after Solana)
@@ -121,7 +121,7 @@ class RaydiumScheduler:
             cron_expression="20 0,4,8,12,16,20 * * *",  # 00:20, 04:20, 08:20, 12:20, 16:20, 20:20 UTC
             function=self.run_ethereum_positions_analysis,
             description="Ethereum Uniswap v3 positions monitoring",
-            enabled=False  # ОТКЛЮЧЕНО: пользователь не хочет получать отладочные сообщения
+            enabled=True  # ВКЛЮЧЕНО: сбор данных без Telegram уведомлений
         )
         
         # Base positions - every 4 hours at :40 (40 min after Solana)
@@ -130,7 +130,7 @@ class RaydiumScheduler:
             cron_expression="40 0,4,8,12,16,20 * * *",  # 00:40, 04:40, 08:40, 12:40, 16:40, 20:40 UTC
             function=self.run_base_positions_analysis,
             description="Base Uniswap v3 positions monitoring",
-            enabled=False  # ОТКЛЮЧЕНО: пользователь не хочет получать частые отчеты Base
+            enabled=True  # ВКЛЮЧЕНО: сбор данных без Telegram уведомлений
         )
         
         # DAO Pools Snapshots - every 4 hours at :10 (70 min after Solana start)
@@ -139,7 +139,7 @@ class RaydiumScheduler:
             cron_expression="10 1,5,9,13,17,21 * * *",  # 01:10, 05:10, 09:10, 13:10, 17:10, 21:10 UTC
             function=self.run_dao_pools_snapshots,
             description="Collect snapshots of all DAO pools after fresh position data",
-            enabled=False  # ОТКЛЮЧЕНО: пользователь не хочет получать DAO SNAPSHOT уведомления
+            enabled=True  # ВКЛЮЧЕНО: сбор данных без Telegram уведомлений
         )
         
         # ===== ОТЧЕТЫ НА ОСНОВЕ СВЕЖИХ ДАННЫХ =====
@@ -513,23 +513,10 @@ class RaydiumScheduler:
             formatted_report_parts = self.formatter.format_pool_report(report_content)
             logging.info(f"Formatted report split into {len(formatted_report_parts)} parts")
             
-            # Send all parts to Telegram
+            # Report generated successfully (no Telegram notification)
             success = True
-            for i, part in enumerate(formatted_report_parts):
-                logging.info(f"Sending part {i+1}/{len(formatted_report_parts)}, length: {len(part)} characters")
-                
-                # Add small delay between messages to avoid rate limiting
-                if i > 0:
-                    await asyncio.sleep(1)
-                
-                part_success = await self.telegram.send_message(part)
-                if not part_success:
-                    logging.error(f"Failed to send report part {i+1}")
-                    success = False
-                    break
-            
-            if not success:
-                raise Exception("Failed to send complete report to Telegram")
+            logging.info(f"Report generated with {len(formatted_report_parts)} parts")
+            # Telegram уведомления отключены по запросу пользователя - только данные собираются
             
             # Extract portfolio value for change monitoring
             total_value = self.formatter._extract_total_value(report_content)
@@ -662,11 +649,11 @@ asyncio.run(main())
                 logging.error(f"Ethereum analysis stderr: {result.stderr}")
                 raise Exception(f"Ethereum positions analysis failed: {result.stderr}")
             
-            # Extract output and send to Telegram
+            # Extract output for logging (no Telegram notification)
             output = result.stdout.strip()
             if output:
-                message = f"⚡ **ETHEREUM POSITIONS CHECK**\n```\n{output}\n```\n🕐 {datetime.now().strftime('%H:%M UTC')}"
-                await self.telegram.send_message(message)
+                logging.info(f"Ethereum positions analysis result: {output}")
+                # Telegram уведомления отключены по запросу пользователя
             
             logging.info("Ethereum positions analysis completed successfully")
             
@@ -716,10 +703,10 @@ asyncio.run(main())
             else:
                 output = result.stdout.strip()
             
-            # Send output to Telegram
+            # Output for logging (no Telegram notification)
             if output:
-                message = f"🔵 **BASE POSITIONS CHECK**\n```\n{output}\n```\n🕐 {datetime.now().strftime('%H:%M UTC')}"
-                await self.telegram.send_message(message)
+                logging.info(f"Base positions analysis result: {output}")
+                # Telegram уведомления отключены по запросу пользователя
             
             logging.info("Base positions analysis completed")
             
@@ -965,8 +952,9 @@ asyncio.run(main())
             else:
                 message = f"📊 **DAO POOLS SNAPSHOT COMPLETED**\n🕐 {datetime.now().strftime('%H:%M UTC')}"
             
-            # Send summary to Telegram
-            await self.telegram.send_message(message)
+            # Log summary (no Telegram notification)
+            logging.info(f"DAO pools snapshot summary: {message}")
+            # Telegram уведомления отключены по запросу пользователя
             
             logging.info("DAO pools snapshots collection completed successfully")
             
