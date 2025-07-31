@@ -41,8 +41,14 @@ class MultiChainReportGenerator:
                 "BpvSz1bQ7qHb7qAD748TREgSPBp6i6kukukNVgX49uxD",
                 "EKuXYJ1Shg38u67vT91YbucttoG1RKCneXF1aEhXq8K6"
             ],
-            "ethereum": ["0x31AAc4021540f61fe20c3dAffF64BA6335396850"],
-            "base": ["0x31AAc4021540f61fe20c3dAffF64BA6335396850"]
+            "ethereum": [
+                "0x31AAc4021540f61fe20c3dAffF64BA6335396850",
+                "0x5d735a96436a97Be8998a85DFde9240f4136C252"
+            ],
+            "base": [
+                "0x31AAc4021540f61fe20c3dAffF64BA6335396850", 
+                "0x5d735a96436a97Be8998a85DFde9240f4136C252"
+            ]
         }
         
         # API ключи

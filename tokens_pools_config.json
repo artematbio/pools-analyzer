@@ -600,6 +600,14 @@
         "fee_tier": 2500,
         "token0": "EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3",
         "token1": "UNKNOWN_USDC_solana"
+      },
+      {
+        "name": "BIO/SPINE",
+        "address": "2J6soXrYA2wgBNYfAk5cBddF2oGPTZtqwdFVctoA17SK",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "token1": "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR"
       }
     ]
   }

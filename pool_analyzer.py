@@ -33,7 +33,7 @@ TARGET_POOL_ID_2 = "4LuGwek6Jv4xpGvsQwZXonmLuRhrpHtmKVs95bN9EkTm"  # SOL/BIO
 TARGET_POOL_ID_3 = "DCNWwwSHSLYRR9WbBunkRaPEC73ba68yQNhytap3qRJZ"  # BIO/QBIO
 TARGET_POOL_ID_4 = "3K2NaZx1KAyJqsdUkUu9qgtk1qJEs6wbygjLxJvvXrLhq" # BIO/GROW
 TARGET_POOL_ID_5 = "CkDV9Eko3KijeRpadFyJTSi4fiBbCT9d3Vdp9JhsUioM" # SOL/SPINE
-TARGET_POOL_ID_6 = "5LZawn1Pqv8Jd96nq5GPVZAz9a7jZWFD66A5JvUodRNL" # BIO/SPINE
+TARGET_POOL_ID_6 = "2J6soXrYA2wgBNYfAk5cBddF2oGPTZtqwdFVctoA17SK" # BIO/SPINE
 TARGET_POOL_ID_7 = "HMWSMe7PVmwmiRccbTW14BkKj54x3XESgBgqAshTutaA" # BIO/RIF
 TARGET_POOL_ID_8 = "FErC1cX1tH2mGRpzfXpeAiNMe6Zu2zpQSeqteDAm9W49" # BIO/URO
 TARGET_POOL_ID_9 = "FgCQoL7tcC1nkNazV5onEgWbm9UJ9nbzqo9rZCYm6Yi4" # SOL/MYCO
@@ -2005,7 +2005,7 @@ async def duplicate_pool_data_to_supabase(pool_data: Dict[str, Any]) -> bool:
                 'token1_address': position.get('token1'),
                 'token1_symbol': pool_data.get('mintB', {}).get('symbol', 'Unknown'),
                 'token1_amount': float(position.get('token1_amount', 0)),
-                'position_value_usd': float(position.get('position_value_usd', 0)),
+                                    'position_value_usd': float(position.get('position_value_usd_str', 0)),
                 'fees_usd': float(position.get('fees_usd', 0)),
                 'in_range': position.get('in_range', False),
                 'current_price': float(pool_data.get('price', 0)),
@@ -2401,7 +2401,7 @@ async def main():
                 # Теперь рассчитаем долю ликвидности для каждой позиции
                 for pos in positions_in_this_main_pool:
                     if pool_tvl_usd > 0:
-                        pos_value_usd = Decimal(pos["position_value_usd"])
+                        pos_value_usd = Decimal(pos["position_value_usd_str"])
                         pos["position_liquidity_share"] = str(pos_value_usd / pool_tvl_usd)
                         pos["position_liquidity_share_percent"] = str((pos_value_usd / pool_tvl_usd) * 100)
                     else:
@@ -2430,25 +2430,46 @@ async def main():
                             print(f"[WARN] No fees data found for position {pos['position_mint']}, setting fees_usd=0.0")
                             pos['fees_usd'] = 0.0
                 
-                # Шаг 3: Анализируем каждую позицию в пуле для получения более точной информации
+                # Шаг 3: Используем данные позиций напрямую из positions.py (БЕЗ дублирования расчетов)
                 analyzed_positions = []
                 for position_data in positions_in_this_main_pool:
-                    print(f"[INFO] Analyzing position {position_data['position_mint']} in pool {current_pool_id_from_list}")
+                    print(f"[INFO] Using position data from positions.py for {position_data['position_mint']} in pool {current_pool_id_from_list}")
                     
-                    # Проверяем наличие ключей перед вызовом функции
+                    # 🔧 ИСПРАВЛЕНИЕ: Используем данные из positions.py НАПРЯМУЮ
+                    # Убираем дублирующий analyze_single_position который дает $0E-125
                     if 'position_mint' in position_data and 'pool_id' in position_data:
-                        # Получаем position_pda, или используем position_mint как запасной вариант
-                        position_pda = position_data.get("position_pda", position_data['position_mint'])
-                        
-                        analyzed_position_details = await analyze_single_position(
-                            position_nft_mint=position_data["position_mint"],
-                            position_pda=position_pda,
-                            target_pool_id=position_data["pool_id"], 
-                            pool_onchain_state=target_pools_onchain_states.get(position_data["pool_id"]),
-                            token_prices=master_token_prices,  # Используем обновленный мастер-словарь
-                            rpc_url=HELIUS_RPC_URL,
-                            client=client
-                        )
+                        analyzed_position_details = {
+                            "position_nft_mint": position_data["position_mint"],
+                            "position_pda": position_data.get("position_pda", position_data['position_mint']),
+                            "pool_id_from_position_state": position_data["pool_id"],
+                            "target_pool_id_for_analysis": position_data["pool_id"],
+                            "tick_lower": position_data.get("tick_lower", 0),
+                            "tick_upper": position_data.get("tick_upper", 0),
+                            "tick_current": position_data.get("current_price", 0),
+                            "is_in_range": position_data.get("in_range", True),
+                            "liquidity": position_data.get("liquidity", "0"),
+                            "token0": {
+                                "mint": position_data.get("token0", ""),
+                                "symbol": position_data.get("token0_symbol", "Unknown"),
+                                "amount": position_data.get("amount0", "0"),
+                                "fees_owed": "0",
+                                "price_usd": position_data.get("token0_price_usd", "0"),
+                                "value_usd": "0"
+                            },
+                            "token1": {
+                                "mint": position_data.get("token1", ""),
+                                "symbol": position_data.get("token1_symbol", "Unknown"), 
+                                "amount": position_data.get("amount1", "0"),
+                                "fees_owed": "0",
+                                "price_usd": position_data.get("token1_price_usd", "0"),
+                                "value_usd": "0"
+                            },
+                            "position_usd_value": position_data.get("position_value_usd_str", "0"),
+                            "token0_price_usd": position_data.get("token0_price_usd", "0"),
+                            "token1_price_usd": position_data.get("token1_price_usd", "0"),
+                            "token0_amount": float(position_data.get("amount0", 0)),
+                            "token1_amount": float(position_data.get("amount1", 0))
+                        }
                         
                         if analyzed_position_details:
                             # Обновляем позицию с дополнительными данными
@@ -2499,7 +2520,7 @@ async def main():
                     },
                     "price": first_position["current_price"],
                     "feeRate": first_position["fee_tier"],
-                    "total_usd_value": sum(Decimal(pos["position_value_usd"]) for pos in positions_in_this_main_pool),
+                    "total_usd_value": sum(Decimal(pos["position_value_usd_str"]) for pos in positions_in_this_main_pool),
                     "in_range_positions": sum(1 for pos in positions_in_this_main_pool if pos["in_range"] is True),
                     "out_of_range_positions": sum(1 for pos in positions_in_this_main_pool if pos["in_range"] is False),
                     # Добавляем новые поля
@@ -2526,9 +2547,9 @@ async def main():
                 # Добавляем данные текущего пула в общий список
                 detailed_report_data_for_primary_pools.append(pool_specific_data)
                 
-                # Дублируем данные пула в Supabase (асинхронно в фоне)
-                print(f"[INFO] Starting pool data duplication to Supabase in background for pool {pool_specific_data.get('name', 'N/A')}...")
-                asyncio.create_task(duplicate_pool_data_to_supabase(pool_specific_data))
+                # 🔧 ИСПРАВЛЕНИЕ: Ждем завершения сохранения вместо фонового режима
+                print(f"[INFO] Saving pool data to Supabase for pool {pool_specific_data.get('name', 'N/A')}...")
+                await duplicate_pool_data_to_supabase(pool_specific_data)
                 
             # Завершение анализа
             end_time = datetime.now()
@@ -2645,7 +2666,7 @@ async def save_report_to_file(pools_data: List[Dict[str, Any]], token_prices: Di
                 report_lines.append("")
                 report_lines.append("Position details:")
                 for j, pos in enumerate(pool_positions, 1):
-                    pos_value = float(pos.get('position_value_usd', 0))
+                    pos_value = float(pos.get('position_value_usd_str', 0))
                     pos_fees = float(pos.get('fees_usd', 0))
                     pos_mint = pos.get('position_mint', 'N/A')[:8] + "..."
                     in_range_status = "✅ In range" if pos.get('in_range', False) else "❌ Out of range"

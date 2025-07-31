@@ -841,7 +841,7 @@ class DAOPoolsSnapshotGenerator:
                         'token_address': token_address,
                         'network': network,
                         'pool_name': f"BIO/{token_symbol}",
-                        'pool_address': '',  # Виртуальный адрес - пул еще не создан
+                        'pool_address': f"virtual_BIO_{token_symbol}_{network}",  # Уникальный виртуальный адрес
                         'dex': 'virtual',
                         'fee_percent': 0,
                         'tvl_usd': 0,  # Виртуальный пул

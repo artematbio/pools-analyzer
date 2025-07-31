@@ -1118,9 +1118,11 @@ async def get_clmm_positions(
 
                 except Exception as e:
                     print(f"Error fetching prices or calculating USD value for position {pos.get('position_mint', 'N/A')}: {e}")
-                    # Гарантируем определение переменных в случае ошибки
+                    # 🐛 ИСПРАВЛЕНИЕ: НЕ сбрасываем position_value_usd если он уже получен из json_uri
                     unclaimed_fees_usd_val = Decimal(0)
-                    position_value_usd = Decimal(0)
+                    # Сохраняем position_value_usd если он уже установлен из json_uri
+                    if 'position_value_usd' not in locals() or not uri_has_position_data:
+                        position_value_usd = Decimal(0)
                     fees_total_usd_str = "0.00"
                     # fees0_amount_str и fees1_amount_str должны быть уже определены выше,
                     # но на всякий случай, если и там была ошибка, можно добавить:
@@ -1278,7 +1280,7 @@ async def get_clmm_positions(
                 "amount1": amount1_str,
                 "in_range": in_range,
                 "current_price": current_price_str,
-                "position_value_usd": position_value_usd_str,
+                "position_value_usd_str": position_value_usd_str,
                 "token0": mintA_addr,
                 "token1": mintB_addr,
                 "token0_price_usd": price0_usd_str,

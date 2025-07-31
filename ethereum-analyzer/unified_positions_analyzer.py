@@ -1787,59 +1787,71 @@ async def update_ethereum_pool_tvl(pool_address: str, update_data: Dict[str, Any
 async def test_unified_positions():
     """Тест получения позиций с разных сетей"""
     
-    # Ethereum кошелек с позициями
-    eth_wallet = "0x31AAc4021540f61fe20c3dAffF64BA6335396850"
+    # Ethereum кошельки с позициями
+    eth_wallets = [
+        "0x31AAc4021540f61fe20c3dAffF64BA6335396850",
+        "0x5d735a96436a97Be8998a85DFde9240f4136C252"
+    ]
     
     print("🧪 Тестируем получение позиций Uniswap v3")
     print("=" * 60)
     
     # Тест Ethereum без фильтрации USD для отладки
     print("\n🔷 ETHEREUM:")
-    eth_positions = await get_uniswap_positions(eth_wallet, "ethereum", min_value_usd=0)
-    print(f"Найдено {len(eth_positions)} позиций на Ethereum")
+    all_eth_positions = []
+    for wallet in eth_wallets:
+        print(f"🔍 Обрабатываем кошелек: {wallet}")
+        eth_positions = await get_uniswap_positions(wallet, "ethereum", min_value_usd=0)
+        print(f"Найдено {len(eth_positions)} позиций для {wallet[:10]}...")
+        all_eth_positions.extend(eth_positions)
+    print(f"Найдено {len(all_eth_positions)} позиций на Ethereum")
     
-    for i, pos in enumerate(eth_positions, 1):
+    for i, pos in enumerate(all_eth_positions, 1):
         print(f"  {i}. {pos['pool_name']} (Token ID: {pos['position_id']})")
         print(f"     Fee: {pos['fee_tier']:.2%}")
         print(f"     Ticks: {pos['tick_lower']} → {pos['tick_upper']}")
         print(f"     Liquidity: {int(pos['liquidity']):,}")
         print(f"     💰 Total Value: ${pos['total_value_usd']:,.2f}")
         print(f"     🪙 Tokens: {pos['amount0']:.6f} {pos['token0_symbol']} + {pos['amount1']:.6f} {pos['token1_symbol']}")
-        print(f"     💵 Prices: {pos['token0_symbol']}=${pos['token0_price_usd']:.6f}, {pos['token1_symbol']}=${pos['token1_price_usd']:.6f}")
-        print(f"     🎁 Unclaimed Fees: {pos['unclaimed_fees_token0']:.6f} {pos['token0_symbol']} + {pos['unclaimed_fees_token1']:.6f} {pos['token1_symbol']} = ${pos['unclaimed_fees_usd']:.2f}")
+        print(f"     💵 Prices: {pos['token0_symbol']}=${pos.get('token0_price_usd', 0):.6f}, {pos['token1_symbol']}=${pos.get('token1_price_usd', 0):.6f}")
+        print(f"     🎁 Unclaimed Fees: {pos.get('unclaimed_fees_token0', 0):.6f} {pos['token0_symbol']} + {pos.get('unclaimed_fees_token1', 0):.6f} {pos['token1_symbol']} = ${pos.get('unclaimed_fees_usd', 0):.2f}")
         print(f"     📊 Status: {'✅ In Range' if pos['in_range'] else '❌ Out of Range'}")
         print("---")
     
     # Сохраняем позиции Ethereum в Supabase
-    if eth_positions and SUPABASE_ENABLED:
-        print(f"\n💾 Сохраняем {len(eth_positions)} позиций Ethereum в Supabase...")
-        saved_count = await save_ethereum_positions_to_supabase(eth_positions, "ethereum")
+    if all_eth_positions and SUPABASE_ENABLED:
+        print(f"\n💾 Сохраняем {len(all_eth_positions)} позиций Ethereum в Supabase...")
+        saved_count = await save_ethereum_positions_to_supabase(all_eth_positions, "ethereum")
         print(f"✅ Сохранено {saved_count} позиций в Supabase")
     
-    # Тест Base 
+        # Тест Base 
     print("\n🔵 BASE:")
-    base_wallet = eth_wallet  # Используем тот же кошелек для тестирования
-    try:
-        base_positions = await get_uniswap_positions(base_wallet, "base", min_value_usd=0)
-        print(f"Найдено {len(base_positions)} позиций на Base")
+    all_base_positions = []
+    
+    for wallet in eth_wallets:  # Используем те же кошельки для Base
+        print(f"🔍 Обрабатываем кошелек: {wallet}")
+        try:
+            base_positions = await get_uniswap_positions(wallet, "base", min_value_usd=0)
+            print(f"Найдено {len(base_positions)} позиций для {wallet[:10]}...")
+            all_base_positions.extend(base_positions)
+        except Exception as e:
+            print(f"❌ Ошибка для кошелька {wallet[:10]}...: {e}")
+    
+    print(f"Найдено {len(all_base_positions)} позиций на Base")
         
-        for i, pos in enumerate(base_positions, 1):
-            print(f"  {i}. {pos['pool_name']} (Token ID: {pos['position_id']})")
-            print(f"     Fee: {pos['fee_tier']:.2%}")
-            print(f"     💰 Total Value: ${pos['total_value_usd']:,.2f}")
-            print(f"     🪙 Tokens: {pos['amount0']:.6f} {pos['token0_symbol']} + {pos['amount1']:.6f} {pos['token1_symbol']}")
-            print(f"     📊 Status: {'✅ In Range' if pos['in_range'] else '❌ Out of Range'}")
-            print("---")
-        
-        # Сохраняем позиции Base в Supabase
-        if base_positions and SUPABASE_ENABLED:
-            print(f"\n💾 Сохраняем {len(base_positions)} позиций Base в Supabase...")
-            saved_count = await save_ethereum_positions_to_supabase(base_positions, "base")
-            print(f"✅ Сохранено {saved_count} позиций в Supabase")
-            
-    except Exception as e:
-        print(f"❌ Ошибка получения позиций Base: {e}")
-        logger.error(f"Base RPC error: {e}")
+    for i, pos in enumerate(all_base_positions, 1):
+        print(f"  {i}. {pos['pool_name']} (Token ID: {pos['position_id']})")
+        print(f"     Fee: {pos['fee_tier']:.2%}")
+        print(f"     💰 Total Value: ${pos['total_value_usd']:,.2f}")
+        print(f"     🪙 Tokens: {pos['amount0']:.6f} {pos['token0_symbol']} + {pos['amount1']:.6f} {pos['token1_symbol']}")
+        print(f"     📊 Status: {'✅ In Range' if pos['in_range'] else '❌ Out of Range'}")
+        print("---")
+
+    # Сохраняем позиции Base в Supabase
+    if all_base_positions and SUPABASE_ENABLED:
+        print(f"\n💾 Сохраняем {len(all_base_positions)} позиций Base в Supabase...")
+        saved_count = await save_ethereum_positions_to_supabase(all_base_positions, "base")
+        print(f"✅ Сохранено {saved_count} позиций в Supabase")
 
 async def get_positions_fees_from_subgraph(
     wallet_address: str, 

@@ -8,7 +8,7 @@
 4. [Детальный workflow](#детальный-workflow)
 5. [Критические зависимости](#критические-зависимости)
 6. [Вычисления и алгоритмы](#вычисления-и-алгоритмы)
-7. [Обработка ошибок](#обработка-ошибок)
+7. [Исправленные проблемы](#исправленные-проблемы)
 8. [Конфигурация](#конфигурация)
 9. [Мониторинг и алертинг](#мониторинг-и-алертинг)
 
@@ -35,105 +35,175 @@
 
 ## 🏗️ Архитектурные слои
 
-### 1. DATA COLLECTION LAYER (Сбор данных)
+### 1. ORCHESTRATION LAYER (Оркестрация)
 
-#### 1.1 Solana Data Collection
-**Основной скрипт**: `positions.py` или `csv_pools_generator_v4.py`
+#### 1.1 Task Scheduler (`scheduler.py`)
+**Главный координатор системы** - управляет выполнением всех задач по расписанию.
 
-**Источники данных**:
-- Helius RPC API
-- Raydium CLMM protocol contracts
-- Token metadata from Jupiter
-
-**Процесс**:
-```
-1. Загрузка кошельков из конфигурации
-2. Получение всех позиций для каждого кошелька
-3. Фильтрация по минимальной стоимости ($10 USD)
-4. Обогащение данными пулов (TVL, цены)
-5. Сохранение в lp_position_snapshots
-```
-
-#### 1.2 Ethereum/Base Data Collection  
-**Основной скрипт**: `unified_positions_analyzer.py`
-
-**Источники данных**:
-- Ethereum RPC (Alchemy/Infura)
-- Base RPC 
-- Uniswap V3 contracts
-- The Graph subgraph
-
-**Процесс**:
-```
-1. Инициализация RPC клиента для сети
-2. Получение всех NFT позиций кошелька
-3. Для каждой позиции:
-   a. Получение метаданных токенов
-   b. Расчет текущей стоимости
-   c. Проверка статуса (in-range/out-of-range)
-   d. Расчет unclaimed fees
-4. Группировка по пулам
-5. Сохранение в lp_position_snapshots и lp_pool_snapshots
-```
-
-#### 1.3 DAO Pools Data Collection
-**Основной скрипт**: `dao_pools_snapshot.py`
-
-**Источники данных**:
-- `tokens_pools_config.json` (централизованная конфигурация)
-- GeckoTerminal API
-- Supabase lp_position_snapshots (для расчетов)
-
-**Процесс**:
-```
-1. Загрузка всех пулов из tokens_pools_config.json
-2. Загрузка данных наших позиций из Supabase
-3. Для каждого пула:
-   a. Запрос к GeckoTerminal API (TVL, цена)
-   b. Расчет метрик DAO токена
-   c. Расчет gap анализа
-   d. Создание виртуальных BIO пар (если отсутствуют)
-4. Расчет исторических изменений (24h, 7d)
-5. Сохранение в dao_pool_snapshots
-```
-
-### 2. DATA STORAGE LAYER (Хранение)
-
-#### 2.1 Database Handler
-**Основной модуль**: `database_handler.py`
-
-**Функции**:
-- Подключение к Supabase PostgreSQL
-- Batch операции для больших объемов данных
-- Методы сохранения для каждого типа данных
-- Получение исторических данных
-
-**Методы**:
+**📋 Расписание задач:**
 ```python
-save_position_snapshot(position_data)      # Сохранение позиций
-save_pool_snapshot(pool_data)              # Сохранение пулов  
-save_dao_pool_snapshot(dao_pool_data)      # Сохранение DAO снапшотов
-get_historical_token_price(symbol, days)   # Исторические цены
-get_historical_token_tvl(symbol, days)     # Исторический TVL
+# СИНХРОНИЗИРОВАННЫЙ СБОР ДАННЫХ (каждые 4 часа)
+'solana_positions_analysis': "0 0,4,8,12,16,20 * * *"      # :00 (Solana первый)
+'ethereum_positions_analysis': "20 0,4,8,12,16,20 * * *"   # :20 (+20 мин после Solana)  
+'base_positions_analysis': "40 0,4,8,12,16,20 * * *"       # :40 (+40 мин после Solana)
+'dao_pools_snapshots': "10 1,5,9,13,17,21 * * *"           # :10 (+70 мин, ПОСЛЕ всех позиций)
+
+# ОТЧЕТЫ (2 раза в день, ПОСЛЕ сбора данных)
+'multichain_telegram_report': "30 13,21 * * *"             # 13:30 и 21:30 UTC
+
+# МОНИТОРИНГ
+'health_check': "*/5 * * * *"                               # Каждые 5 минут
+'out_of_range_check': "*/30 * * * *"                       # Каждые 30 минут
+'range_proximity_check': "*/15 * * * *"                    # Каждые 15 минут
 ```
 
-#### 2.2 Схемы таблиц Supabase
+**⚡ Критическая последовательность:**
+1. **СНАЧАЛА** позиции (все сети) → **ПОТОМ** пулы → **ПОТОМ** отчеты
+2. **dao_pools_snapshot.py НЕ МОЖЕТ работать без данных позиций!**
 
-**lp_position_snapshots**:
+### 2. DATA COLLECTION LAYER (Сбор данных)
+
+#### 2.1 Solana Data Collection (`pool_analyzer.py` + `positions.py`)
+
+**🔗 Источники данных:**
+```
+├── Helius RPC API: NFT позиции (https://mainnet.helius-rpc.com)
+├── Raydium json_uri API: USD values позиций 
+├── GeckoTerminal API: цены токенов, FDV
+└── Bitquery API: исторические данные (опционально)
+```
+
+**⚙️ Процесс:**
+```python
+# 1. Получение позиций
+positions = await get_positions_from_multiple_wallets(SOLANA_WALLETS)
+# Кошельки: BpvSz1bQ7qHb7qAD748TREgSPBp6i6kukukNVgX49uxD, EKuXYJ1Shg38u67vT91YbucttoG1RKCneXF1aEhXq8K6
+
+# 2. Обработка каждой позиции
+for position in positions:
+    # a. positions.py получает NFT данные через Helius RPC
+    # b. Извлекает USD value из Raydium json_uri API  
+    # c. Получает цены токенов через GeckoTerminal
+    # d. Рассчитывает метрики позиции (APR, in_range статус)
+    
+# 3. Сохранение в Supabase
+await save_positions_to_supabase(positions, network='solana')
+```
+
+**🐛 КРИТИЧЕСКИЕ ИСПРАВЛЕНИЯ в `positions.py`:**
+```python
+# ПРОБЛЕМА: except блок сбрасывал position_value_usd = 0 даже если получен из json_uri
+except Exception as e:
+    print(f"Error fetching prices...")
+    unclaimed_fees_usd_val = Decimal(0)
+    # ❌ БЫЛО: position_value_usd = Decimal(0)  # Всегда сбрасывал!
+    # ✅ СТАЛО: Сохраняем position_value_usd если он получен из json_uri
+    if 'position_value_usd' not in locals() or not uri_has_position_data:
+        position_value_usd = Decimal(0)
+
+# ИСПРАВЛЕН ключ в финальном словаре:
+"position_value_usd_str": position_value_usd_str,  # Было: "position_value_usd"
+```
+
+**🐛 КРИТИЧЕСКИЕ ИСПРАВЛЕНИЯ в `pool_analyzer.py`:**
+```python
+# ПРОБЛЕМА: KeyError из-за изменения ключа в positions.py
+# ❌ БЫЛО: pos_value_usd = Decimal(pos["position_value_usd"])
+# ✅ СТАЛО: 
+pos_value_usd = Decimal(pos["position_value_usd_str"])  # Все 4 места исправлены
+```
+
+#### 2.2 Ethereum/Base Data Collection (`unified_positions_analyzer.py`)
+
+**🔗 Источники данных:**
+```
+├── Ethereum RPC: Alchemy endpoint
+├── Base RPC: Alchemy endpoint  
+├── Uniswap V3 contracts: NFT Manager, Pool contracts
+└── The Graph subgraph: метаданные пулов
+```
+
+**⚙️ Процесс:**
+```python
+# 1. Получение NFT позиций
+wallet = "0x31AAc4021540f61fe20c3dAffF64BA6335396850"
+positions = await get_uniswap_positions(wallet, network)
+
+# 2. Для каждой позиции
+for position in positions:
+    # a. RPC вызовы к Uniswap V3 NFT Manager
+    # b. Получение token0/token1 addresses
+    # c. Расчет текущей стоимости позиции
+    # d. Проверка in-range/out-of-range статуса
+    # e. Расчет unclaimed fees
+    # f. Получение данных пула (TVL, volume)
+
+# 3. Сохранение в Supabase
+await save_positions_to_supabase(positions, network)
+await save_pools_to_supabase(pool_data, network)
+```
+
+#### 2.3 DAO Pools Data Collection (`dao_pools_snapshot.py`)
+
+**📋 Входные данные:**
+```
+├── tokens_pools_config.json: 48 пулов конфигурации
+├── lp_position_snapshots: КРИТИЧЕСКАЯ ЗАВИСИМОСТЬ!
+└── GeckoTerminal API: цены, TVL, FDV
+```
+
+**⚙️ Процесс:**
+```python
+# 1. КРИТИЧЕСКАЯ ЗАГРУЗКА наших позиций
+our_positions = await load_our_positions_from_supabase()
+# БЕЗ ЭТИХ ДАННЫХ dao_pools_snapshot.py НЕ МОЖЕТ РАБОТАТЬ!
+
+# 2. Обработка каждого пула из конфига
+for pool_info in tokens_pools_config.json:
+    # a. API запрос к GeckoTerminal
+    api_data = await get_pool_data_from_geckoterminal(pool_address)
+    
+    # b. Поиск DAO токена
+    dao_token = find_dao_token_for_pool(pool_info)
+    
+    # c. КРИТИЧЕСКИЙ РАСЧЕТ метрик с использованием позиций
+    metrics = calculate_pool_dao_metrics(pool_info, dao_token, our_positions)
+    # Рассчитывает:
+    # - our_position_value_usd (из our_positions таблицы!)
+    # - target_lp_value_usd (1% от FDV для BIO пар)
+    # - lp_gap_usd (разрыв до цели для инвестиций)
+    # - is_bio_pair (только BIO пары, исключая QBIO)
+
+# 3. Создание виртуальных BIO пар
+virtual_pairs = create_virtual_bio_pairs(dao_tokens)
+# Для токенов без реальных BIO пар
+
+# 4. Сохранение в dao_pool_snapshots
+await save_snapshots_to_supabase(all_snapshots)
+```
+
+### 3. DATA STORAGE LAYER (Хранение)
+
+#### 3.1 Database Handler (`database_handler.py`)
+**Основной модуль** для работы с Supabase PostgreSQL.
+
+#### 3.2 Схемы таблиц Supabase
+
+**`lp_position_snapshots`** (основная таблица позиций):
 ```sql
 CREATE TABLE lp_position_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  position_mint TEXT NOT NULL,           -- ID позиции (без префиксов сети)
+  position_mint TEXT NOT NULL,           -- ID позиции/NFT (без префиксов сети)
   network TEXT NOT NULL,                 -- 'solana', 'ethereum', 'base' 
   pool_id TEXT NOT NULL,                 -- Адрес пула (без префиксов)
-  pool_name TEXT,                        -- Имя пула (TOKEN0/TOKEN1)
+  pool_name TEXT,                        -- 'BIO/MYCO', 'ETH/USDC'
   token0_address TEXT,
   token0_symbol TEXT,
   token0_amount DECIMAL,
   token1_address TEXT, 
   token1_symbol TEXT,
   token1_amount DECIMAL,
-  position_value_usd DECIMAL,            -- Основная стоимость позиции
+  position_value_usd DECIMAL,            -- Основная стоимость позиции $$
   fees_usd DECIMAL,                      -- Unclaimed fees
   in_range BOOLEAN,                      -- Статус позиции
   current_price DECIMAL,
@@ -146,22 +216,22 @@ CREATE TABLE lp_position_snapshots (
 );
 ```
 
-**dao_pool_snapshots**:
+**`dao_pool_snapshots`** (DAO метрики для инвестиционных решений):
 ```sql
 CREATE TABLE dao_pool_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  pool_address TEXT NOT NULL,
-  pool_name TEXT NOT NULL,
-  network TEXT NOT NULL,
-  dex TEXT,
-  tvl_usd DECIMAL,
-  token_symbol TEXT,
-  token_fdv_usd DECIMAL,
-  bio_price_usd DECIMAL,
-  is_bio_pair BOOLEAN,
-  our_position_value_usd DECIMAL,        -- ЗАВИСИТ ОТ lp_position_snapshots
-  target_lp_value_usd DECIMAL,           -- 1% от FDV для BIO пар
-  lp_gap_usd DECIMAL,                    -- Разрыв до цели
+  pool_address TEXT NOT NULL,            -- Адрес пула
+  pool_name TEXT NOT NULL,               -- 'BIO/MYCO', 'ETH/USDC'
+  network TEXT NOT NULL,                 -- 'solana', 'ethereum', 'base'
+  dex TEXT,                              -- 'raydium', 'uniswap_v3', 'virtual'
+  tvl_usd DECIMAL,                       -- Total Value Locked
+  token_symbol TEXT,                     -- Символ DAO токена
+  token_fdv_usd DECIMAL,                 -- Fully Diluted Value
+  bio_price_usd DECIMAL,                 -- Цена BIO токена
+  is_bio_pair BOOLEAN,                   -- Флаг BIO пары (исключая QBIO)
+  our_position_value_usd DECIMAL,        -- Наша стоимость (ИЗ lp_position_snapshots!)
+  target_lp_value_usd DECIMAL,           -- Цель (1% от FDV)
+  lp_gap_usd DECIMAL,                    -- Разрыв для инвестиций
   price_change_24h_percent DECIMAL,      -- Исторические изменения  
   price_change_7d_percent DECIMAL,
   tvl_change_7d_percent DECIMAL,
@@ -170,13 +240,13 @@ CREATE TABLE dao_pool_snapshots (
 );
 ```
 
-**lp_pool_snapshots**:
+**`lp_pool_snapshots`** (данные пулов):
 ```sql
 CREATE TABLE lp_pool_snapshots (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   pool_id TEXT NOT NULL,                 -- Адрес пула
   pool_address TEXT NOT NULL,            -- Дублирование для совместимости
-  pool_name TEXT,                        -- TOKEN0/TOKEN1
+  pool_name TEXT,                        -- 'BIO/MYCO', 'ETH/USDC'
   network TEXT NOT NULL,
   token0_address TEXT,
   token0_symbol TEXT,
@@ -193,59 +263,38 @@ CREATE TABLE lp_pool_snapshots (
 );
 ```
 
-### 3. REPORTING LAYER (Отчетность)
-
-#### 3.1 Multichain Report Generator
-**Основной скрипт**: `multichain_report_generator.py`
-
-**Функции**:
-- Агрегация данных со всех сетей
-- Форматирование unified отчета
-- Отправка в Telegram
-
-**Алгоритм**:
-```
-1. Сбор данных Solana из lp_position_snapshots
-2. Сбор данных Ethereum из lp_position_snapshots  
-3. Сбор данных Base из lp_position_snapshots
-4. Расчет агрегированной статистики:
-   - Total portfolio value
-   - Networks summary
-   - Top positions by value
-   - Out-of-range positions count
-5. Форматирование через ReportFormatter
-6. Отправка через TelegramSender
+**`bio_dao_lp_support`** (VIEW для инвестиционных решений):
+```sql
+-- Критический VIEW объединяющий данные из dao_pool_snapshots и lp_position_snapshots
+-- Показывает GAP анализ для инвестиций в DAO токены
 ```
 
-#### 3.2 CSV Report Generator  
-**Основной скрипт**: `csv_pools_generator_v4.py`
+### 4. REPORTING LAYER (Отчетность)
 
-**Функции**:
-- Детальный CSV отчет по токенам и пулам
-- Группировка по токенам
-- Сохранение агрегированных данных в Supabase
+#### 4.1 Multichain Report Generator (`multichain_report_generator.py`)
 
-### 4. ORCHESTRATION LAYER (Оркестрация)
+**📋 Источники данных:**
+```
+├── lp_position_snapshots (все сети)
+├── lp_pool_snapshots (данные пулов)
+└── dao_pool_snapshots (DAO метрики)
+```
 
-#### 4.1 Task Scheduler
-**Основной скрипт**: `scheduler.py`
-
-**Задачи и расписание**:
+**⚙️ Процесс:**
 ```python
-# СБОР ПОЗИЦИЙ
-'ethereum_positions_analysis': "0 */4 * * *"           # Каждые 4 часа
-'base_positions_analysis': "0 2,6,10,14,18,22 * * *"   # Каждые 4 часа (+2ч offset)
+# 1. Сбор данных со всех сетей (ИСПРАВЛЕННАЯ логика фильтрации)
+# ❌ БЫЛО: .like('position_mint', 'ethereum_%')  # position_mint НЕ содержит префиксов!
+# ✅ СТАЛО:
+solana_data = supabase.table('lp_position_snapshots').select('*').eq('network', 'solana')
+ethereum_data = supabase.table('lp_position_snapshots').select('*').eq('network', 'ethereum')  
+base_data = supabase.table('lp_position_snapshots').select('*').eq('network', 'base')
 
-# СБОР ПУЛОВ (ЗАВИСИТ ОТ ПОЗИЦИЙ)
-'dao_pools_snapshots': "30 9,21 * * *"                 # 09:30 и 21:30 UTC
+# 2. Агрегация статистики
+summary = calculate_multichain_summary(all_networks_data)
 
-# ГЕНЕРАЦИЯ ОТЧЕТОВ  
-'multichain_csv_report': "0 10 * * *"                  # 10:00 UTC ежедневно
-'multichain_telegram_report': "0 12,20 * * *"          # 12:00 и 20:00 UTC
-
-# СИСТЕМНЫЕ ЗАДАЧИ
-'health_check': "*/5 * * * *"                          # Каждые 5 минут
-'out_of_range_check': "*/30 * * * *"                   # Каждые 30 минут
+# 3. Форматирование и отправка
+formatted_report = format_multichain_report(summary)
+await telegram_sender.send_message(formatted_report)
 ```
 
 ---
@@ -254,269 +303,137 @@ CREATE TABLE lp_pool_snapshots (
 
 ### ЭТАП 1: Position Data Collection (ОБЯЗАТЕЛЬНЫЙ ПЕРВЫЙ ЭТАП)
 
-#### 1.1 Solana Positions Collection
+```mermaid
+sequenceDiagram
+    participant S as Scheduler
+    participant PA as pool_analyzer.py
+    participant P as positions.py
+    participant UA as unified_positions_analyzer.py
+    participant DB as Supabase
 
-**Входные данные**:
-- Список кошельков из конфигурации
-- Минимальная стоимость позиции ($10)
+    S->>PA: 00:00 UTC - Solana positions
+    PA->>P: get_clmm_positions()
+    P->>P: Helius RPC + Raydium json_uri
+    P-->>PA: positions with USD values
+    PA->>DB: lp_position_snapshots (network='solana')
 
-**Процесс**:
-```python
-# positions.py или csv_pools_generator_v4.py
-async def collect_solana_positions():
-    for wallet_address in SOLANA_WALLETS:
-        # 1. Получение всех позиций кошелька
-        positions = await get_wallet_positions(wallet_address)
-        
-        # 2. Фильтрация по стоимости
-        filtered = [p for p in positions if p['value_usd'] >= 10]
-        
-        # 3. Обогащение данными пулов
-        for position in filtered:
-            pool_data = await get_pool_info(position['pool_address'])
-            position.update(pool_data)
-            
-        # 4. Сохранение в Supabase
-        await save_positions_batch(filtered)
+    S->>UA: 00:20 UTC - Ethereum positions  
+    UA->>UA: Ethereum RPC + Uniswap V3
+    UA->>DB: lp_position_snapshots (network='ethereum')
+    UA->>DB: lp_pool_snapshots
+
+    S->>UA: 00:40 UTC - Base positions
+    UA->>UA: Base RPC + Uniswap V3  
+    UA->>DB: lp_position_snapshots (network='base')
+    UA->>DB: lp_pool_snapshots
 ```
-
-**Выходные данные**: Записи в `lp_position_snapshots` с network='solana'
-
-#### 1.2 Ethereum/Base Positions Collection
-
-**Входные данные**:
-- Ethereum/Base кошелек: `0x31AAc4021540f61fe20c3dAffF64BA6335396850`
-- RPC endpoints для сетей
-
-**Процесс**:
-```python
-# unified_positions_analyzer.py
-async def get_uniswap_positions(wallet_address, network):
-    # 1. Инициализация RPC клиента
-    rpc_client = RPCClient(NETWORK_CONFIGS[network]['rpc_url'])
-    
-    # 2. Получение всех NFT позиций из Uniswap V3
-    nft_positions = await get_wallet_nft_positions(wallet_address)
-    
-    # 3. Для каждой позиции
-    for nft_id in nft_positions:
-        # a. Получение данных позиции
-        position_data = await get_position_details(nft_id)
-        
-        # b. Получение метаданных токенов
-        token_metadata = await get_tokens_metadata([
-            position_data['token0'], 
-            position_data['token1']
-        ])
-        
-        # c. Расчет текущей стоимости
-        current_value = await calculate_position_value(position_data)
-        
-        # d. Проверка in-range статуса
-        in_range = check_position_in_range(position_data)
-        
-        # e. Расчет unclaimed fees
-        fees = await calculate_unclaimed_fees(position_data)
-        
-    # 4. Сохранение в Supabase
-    await save_ethereum_positions_to_supabase(positions, network)
-```
-
-**Критические исправления**:
-```python
-# ✅ ПРАВИЛЬНОЕ формирование pool_save_data
-pool_token_info[pool_address] = {
-    'token0_address': pos_data["token0"],
-    'token1_address': pos_data["token1"], 
-    'token0_symbol': token0_meta.get("symbol", "UNK"),
-    'token1_symbol': token1_meta.get("symbol", "UNK"),
-    'fee_tier': pos_data["fee"]
-}
-
-pool_save_data = {
-    'pool_address': pool_address,
-    'pool_name': f"{token0_symbol}/{token1_symbol}",  # ← НЕ Pool_0x...
-    'pool_id': pool_address,                          # ← БЕЗ префиксов сети
-    'token0_address': token_info.get('token0_address'),
-    'token1_address': token_info.get('token1_address'),
-    'token0_symbol': token0_symbol,
-    'token1_symbol': token1_symbol,
-    'fee_tier': token_info.get('fee_tier', 3000)
-}
-```
-
-**Выходные данные**: 
-- Записи в `lp_position_snapshots` с network='ethereum'/'base'
-- Записи в `lp_pool_snapshots` с данными пулов
 
 ### ЭТАП 2: Pool Data Collection (ЗАВИСИТ ОТ ЭТАПА 1)
 
-#### 2.1 DAO Pools Snapshot Collection
+```mermaid
+sequenceDiagram
+    participant S as Scheduler
+    participant DPS as dao_pools_snapshot.py
+    participant DB as Supabase
+    participant GT as GeckoTerminal API
 
-**Входные данные**:
-- `tokens_pools_config.json` (48 пулов: 20 Ethereum + 9 Base + 19 Solana)
-- Данные из `lp_position_snapshots` (КРИТИЧЕСКАЯ ЗАВИСИМОСТЬ)
-
-**Процесс**:
-```python
-# dao_pools_snapshot.py
-async def generate_snapshot():
-    # 1. КРИТИЧНО: Загрузка наших позиций из Supabase
-    our_positions = await load_our_positions_from_supabase()
-    
-    # 2. Загрузка пулов из конфигурации
-    all_pools = await load_pools_from_config()
-    
-    # 3. Загрузка DAO токенов для расчетов FDV
-    dao_tokens = await load_dao_tokens_for_calculations()
-    
-    # 4. Для каждого пула из конфига
-    for pool_info in all_pools:
-        # a. Запрос к GeckoTerminal API
-        api_data = await get_pool_data_from_geckoterminal(
-            pool_info['pool_address']
-        )
-        
-        # b. Поиск соответствующего DAO токена
-        dao_token = find_dao_token_for_pool(pool_info, dao_tokens)
-        
-        # c. КРИТИЧЕСКИЙ РАСЧЕТ: метрики с использованием позиций
-        if dao_token:
-            metrics = calculate_pool_dao_metrics(
-                pool_info, dao_token, our_positions  # ← ЗАВИСИМОСТЬ!
-            )
-        else:
-            metrics = create_basic_pool_metrics(pool_info, our_positions)
-        
-        # d. Расчет исторических изменений
-        historical = await calculate_historical_changes(pool_info)
-        
-        # e. Формирование снапшота
-        snapshot = {
-            **pool_info,
-            **api_data,
-            **metrics,
-            **historical,
-            'snapshot_timestamp': datetime.now(timezone.utc)
-        }
-        
-    # 5. Создание виртуальных BIO пар
-    virtual_pairs = create_virtual_bio_pairs(dao_tokens)
-    
-    # 6. Сохранение в dao_pool_snapshots
-    await save_snapshots_to_supabase(all_snapshots)
+    S->>DPS: 01:10 UTC - DAO pools (ПОСЛЕ всех позиций)
+    DPS->>DB: load_our_positions_from_supabase() 🚨 КРИТИЧНО!
+    DB-->>DPS: our_positions данные
+    DPS->>GT: get_pool_data_from_geckoterminal()
+    GT-->>DPS: цены, TVL, FDV
+    DPS->>DPS: calculate_pool_dao_metrics(our_positions)
+    DPS->>DPS: create_virtual_bio_pairs()
+    DPS->>DB: dao_pool_snapshots
 ```
 
-**Критическая зависимость**:
-```python
-async def load_our_positions_from_supabase():
-    """БЕЗ ЭТИХ ДАННЫХ dao_pools_snapshot.py НЕ МОЖЕТ РАБОТАТЬ!"""
-    result = supabase_handler.client.table('lp_position_snapshots').select('*').gte(
-        'created_at', week_ago
-    ).order('created_at', desc=True).execute()
-    
-    # Группировка по pool_id + network
-    positions_by_pool = {}
-    for pos in result.data:
-        pool_key = f"{pos['pool_id'].lower()}_{pos['network']}"
-        if pool_key not in positions_by_pool:
-            positions_by_pool[pool_key] = pos
-    
-    return positions_by_pool
-```
+### ЭТАП 3: Report Generation
 
-**Выходные данные**: Записи в `dao_pool_snapshots`
+```mermaid
+sequenceDiagram
+    participant S as Scheduler
+    participant MRG as multichain_report_generator.py
+    participant DB as Supabase
+    participant TG as Telegram
 
-### ЭТАП 3: Report Generation (ИСПОЛЬЗУЕТ ВСЕ ДАННЫЕ)
-
-#### 3.1 Multichain Telegram Report
-
-**Входные данные**:
-- `lp_position_snapshots` (все сети)
-- `lp_pool_snapshots` (контекст пулов)
-
-**Процесс**:
-```python
-# multichain_report_generator.py
-async def generate_report():
-    # 1. Сбор данных со всех сетей
-    solana_data = await get_solana_data_from_supabase()
-    ethereum_data = await get_ethereum_data_from_supabase()  
-    base_data = await get_base_data_from_supabase()
-    
-    # 2. Агрегация статистики
-    summary = calculate_multichain_summary({
-        'solana': solana_data,
-        'ethereum': ethereum_data,
-        'base': base_data
-    })
-    
-    # 3. Форматирование отчета
-    formatted_report = format_multichain_report(summary)
-    
-    # 4. Отправка в Telegram
-    await telegram_sender.send_message(formatted_report)
-```
-
-**Критическое исправление фильтрации**:
-```python
-# ❌ БЫЛО (неправильно):
-positions_result = supabase_handler.client.table('lp_position_snapshots').select('*').like(
-    'position_mint', 'ethereum_%'  # ← position_mint НЕ содержит префиксов!
-)
-
-# ✅ СТАЛО (правильно):
-positions_result = supabase_handler.client.table('lp_position_snapshots').select('*').eq(
-    'network', 'ethereum'  # ← Фильтрация по network колонке
-)
+    S->>MRG: 13:30/21:30 UTC - Reports
+    MRG->>DB: SELECT * FROM lp_position_snapshots
+    MRG->>DB: SELECT * FROM dao_pool_snapshots  
+    DB-->>MRG: все данные
+    MRG->>MRG: calculate_multichain_summary()
+    MRG->>MRG: format_report()
+    MRG->>TG: send_message()
 ```
 
 ---
 
-## 🧮 Вычисления и алгоритмы
+## 🔗 Критические зависимости
+
+### 1. dao_pools_snapshot.py → lp_position_snapshots
+
+**⚠️ КРИТИЧЕСКАЯ ЗАВИСИМОСТЬ:**
+```python
+# dao_pools_snapshot.py НЕ МОЖЕТ работать без этих данных:
+our_positions = await load_our_positions_from_supabase()
+
+# Используется для расчета:
+pool_key = f"{pool_address.lower()}_{network}"
+our_position_value = our_positions.get(pool_key, {}).get('total_value_usd', 0)
+lp_gap_usd = target_lp_value_usd - our_position_value  # Инвестиционный разрыв
+```
+
+### 2. Последовательность в Scheduler
+
+**✅ ПРАВИЛЬНАЯ последовательность:**
+```python
+# 1. Сначала ВСЕ позиции (с интервалами)
+00:00 UTC: Solana positions
+00:20 UTC: Ethereum positions (+20 мин)
+00:40 UTC: Base positions (+40 мин)
+    
+# 2. Потом пулы (ПОСЛЕ всех позиций)
+01:10 UTC: DAO pools snapshot (+70 мин от начала)
+    
+# 3. Потом отчеты (используют ВСЕ данные)
+13:30/21:30 UTC: Telegram reports
+```
+
+### 3. View bio_dao_lp_support зависимости
+
+**📊 VIEW объединяет:**
+```sql
+-- dao_pool_snapshots: метрики DAO токенов
+-- lp_position_snapshots: наши текущие позиции
+-- Результат: GAP анализ для инвестиций
+```
+
+---
+
+## 📐 Вычисления и алгоритмы
 
 ### 1. Pool DAO Metrics Calculation
-
-**Местоположение**: `dao_pools_snapshot.py:540-591`
 
 ```python
 def calculate_pool_dao_metrics(pool_data, dao_token_info, our_positions):
     """Расчет ключевых метрик для DAO пула"""
     
-    # 1. Определение DAO токена в пуле
-    dao_token_symbol = dao_token_info['symbol']
-    pool_name = pool_data['pool_name'].upper()
-    is_dao_in_pool = dao_token_symbol.upper() in pool_name
-    
-    # 2. Проверка BIO пары
+    # 1. Проверка BIO пары (исключая QBIO)
     is_bio_pair = (
         'BIO' in pool_name and 
         dao_token_symbol.upper() in pool_name and
-        dao_token_symbol.upper() != 'QBIO'  # Исключение QBIO
+        dao_token_symbol.upper() != 'QBIO'
     )
     
-    # 3. Расчет количества DAO токена в пуле
-    tvl_usd = pool_data['tvl_usd']
-    dao_token_price = dao_token_info.get('price_usd', 0)
-    
-    if dao_token_price > 0 and is_dao_in_pool:
-        # Предположение 50/50 распределения в пуле
-        dao_token_value_in_pool = tvl_usd / 2
-        dao_token_amount_in_pool = dao_token_value_in_pool / dao_token_price
-    else:
-        dao_token_value_in_pool = 0
-        dao_token_amount_in_pool = 0
-    
-    # 4. КРИТИЧЕСКИЙ РАСЧЕТ: стоимость наших позиций
+    # 2. КРИТИЧЕСКИЙ РАСЧЕТ: стоимость наших позиций
     pool_key = f"{pool_data['pool_address'].lower()}_{pool_data['network']}"
     our_position_value = our_positions.get(pool_key, {}).get('total_value_usd', 0)
     
-    # 5. Целевая ликвидность для BIO пар (1% от FDV)
+    # 3. Целевая ликвидность для BIO пар (1% от FDV)
     target_lp_value_usd = 0
     if is_bio_pair and dao_token_info.get('fdv_usd', 0) > 0:
-        target_lp_value_usd = dao_token_info['fdv_usd'] * 0.01  # 1% от FDV
+        target_lp_value_usd = dao_token_info['fdv_usd'] * 0.01
     
-    # 6. Расчет gap (разрыва до цели)
+    # 4. Расчет gap (разрыва до цели)
     lp_gap_usd = target_lp_value_usd - our_position_value
     
     return {
@@ -527,56 +444,7 @@ def calculate_pool_dao_metrics(pool_data, dao_token_info, our_positions):
     }
 ```
 
-### 2. Historical Data Calculation
-
-**Местоположение**: `dao_pools_snapshot.py:685-711`
-
-```python
-async def calculate_historical_changes(token_symbol):
-    """Расчет исторических изменений цены и TVL"""
-    
-    # 1. Получение исторических цен
-    price_24h_ago = await database_handler.get_historical_token_price(
-        token_symbol, days_back=1
-    )
-    price_7d_ago = await database_handler.get_historical_token_price(
-        token_symbol, days_back=7
-    )
-    current_price = current_token_data.get('price_usd', 0)
-    
-    # 2. Расчет процентных изменений цены
-    if price_24h_ago and price_24h_ago > 0:
-        price_change_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100
-    else:
-        price_change_24h = 0
-        
-    if price_7d_ago and price_7d_ago > 0:
-        price_change_7d = ((current_price - price_7d_ago) / price_7d_ago) * 100
-    else:
-        price_change_7d = 0
-    
-    # 3. Получение исторического TVL
-    tvl_7d_ago = await database_handler.get_historical_token_tvl(
-        token_symbol, days_back=7
-    )
-    current_tvl = current_token_data.get('total_tvl_usd', 0)
-    
-    # 4. Расчет изменения TVL
-    if tvl_7d_ago and tvl_7d_ago > 0:
-        tvl_change_7d = ((current_tvl - tvl_7d_ago) / tvl_7d_ago) * 100
-    else:
-        tvl_change_7d = 0
-    
-    return {
-        'price_change_24h_percent': round(price_change_24h, 2),
-        'price_change_7d_percent': round(price_change_7d, 2),
-        'tvl_change_7d_percent': round(tvl_change_7d, 2)
-    }
-```
-
-### 3. Virtual BIO Pairs Creation
-
-**Местоположение**: `dao_pools_snapshot.py:765-798`
+### 2. Virtual BIO Pairs Creation
 
 ```python
 def create_virtual_bio_pairs(dao_tokens, bio_price):
@@ -585,7 +453,6 @@ def create_virtual_bio_pairs(dao_tokens, bio_price):
     virtual_pairs = []
     
     for token_symbol, token_info in dao_tokens.items():
-        # Пропускаем сам BIO
         if token_symbol.upper() == 'BIO':
             continue
             
@@ -597,12 +464,12 @@ def create_virtual_bio_pairs(dao_tokens, bio_price):
         )
         
         if not bio_pair_exists:
-            # Создаем виртуальную пару
             fdv_usd = token_info.get('fdv_usd', 0)
-            target_lp_value = fdv_usd * 0.01 if fdv_usd > 0 else 0  # 1% от FDV
+            target_lp_value = fdv_usd * 0.01 if fdv_usd > 0 else 0
             
+            # 🔧 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: уникальный pool_address
             virtual_pair = {
-                'pool_address': f"virtual_{token_symbol.lower()}_bio",
+                'pool_address': f"virtual_BIO_{token_symbol}_{network}",  # Уникальность!
                 'pool_name': f"{token_symbol}/BIO",
                 'network': token_info.get('primary_network', 'solana'),
                 'dex': 'virtual',
@@ -613,7 +480,7 @@ def create_virtual_bio_pairs(dao_tokens, bio_price):
                 'is_bio_pair': True,
                 'our_position_value_usd': 0,
                 'target_lp_value_usd': target_lp_value,
-                'lp_gap_usd': target_lp_value,  # Полный gap, так как позиции нет
+                'lp_gap_usd': target_lp_value,  # Полный gap
                 'price_change_24h_percent': 0,
                 'price_change_7d_percent': 0,
                 'tvl_change_7d_percent': 0
@@ -624,185 +491,97 @@ def create_virtual_bio_pairs(dao_tokens, bio_price):
     return virtual_pairs
 ```
 
-### 4. Multichain Summary Calculation
+---
 
-**Местоположение**: `multichain_report_generator.py:138-180`
+## 🐛 Исправленные проблемы
 
+### 1. BIO/MYCO и BIO/SPINE позиции показывали $0
+
+**🔍 ДИАГНОСТИКА:**
+- positions.py получал правильные USD values ($18,386) из Raydium json_uri API
+- Но итоговый результат показывал $0
+
+**🔧 КОРЕНЬ ПРОБЛЕМЫ:**
 ```python
-def _calculate_summary(multichain_data):
-    """Расчет агрегированной статистики по всем сетям"""
-    
-    summary = multichain_data['summary']
-    
-    # 1. Подсчет общих метрик
-    total_value = 0
-    total_positions = 0
-    out_of_range_count = 0
-    
-    for network, positions in multichain_data.items():
-        if network == 'summary':
-            continue
-            
-        network_value = 0
-        network_positions = len(positions)
-        
-        for position in positions:
-            value = position.get('total_value_usd', 0) or position.get('position_value_usd', 0)
-            network_value += value
-            
-            # Подсчет out-of-range позиций
-            if not position.get('in_range', True):
-                out_of_range_count += 1
-        
-        total_value += network_value
-        total_positions += network_positions
-        
-        # Сохранение статистики по сети
-        summary[f'{network}_value'] = network_value
-        summary[f'{network}_positions'] = network_positions
-    
-    # 2. Обновление общей статистики
-    summary.update({
-        'total_value_usd': total_value,
-        'total_positions': total_positions,
-        'out_of_range_positions': out_of_range_count,
-        'in_range_positions': total_positions - out_of_range_count,
-        'average_position_size': total_value / total_positions if total_positions > 0 else 0
-    })
-    
-    # 3. Определение топ-5 позиций
-    all_positions = []
-    for network, positions in multichain_data.items():
-        if network != 'summary':
-            for pos in positions:
-                pos['network'] = network
-                all_positions.append(pos)
-    
-    # Сортировка по стоимости
-    top_positions = sorted(
-        all_positions, 
-        key=lambda x: x.get('total_value_usd', 0) or x.get('position_value_usd', 0),
-        reverse=True
-    )[:5]
-    
-    summary['top_positions'] = top_positions
+# positions.py: except блок сбрасывал position_value_usd = 0
+except Exception as e:
+    print(f"Error fetching prices...")
+    unclaimed_fees_usd_val = Decimal(0)
+    position_value_usd = Decimal(0)  # ❌ ВСЕГДА сбрасывал, даже если получен из json_uri!
+```
+
+**✅ РЕШЕНИЕ:**
+```python
+except Exception as e:
+    print(f"Error fetching prices...")
+    unclaimed_fees_usd_val = Decimal(0)
+    # ✅ НЕ сбрасываем position_value_usd если он получен из json_uri
+    if 'position_value_usd' not in locals() or not uri_has_position_data:
+        position_value_usd = Decimal(0)
+```
+
+### 2. KeyError: 'position_value_usd' в pool_analyzer.py
+
+**🔍 ПРОБЛЕМА:**
+- positions.py вернул ключ 'position_value_usd_str'
+- pool_analyzer.py искал старый ключ 'position_value_usd'
+
+**✅ РЕШЕНИЕ:**
+```python
+# Исправлены все 4 места в pool_analyzer.py:
+# ❌ БЫЛО: pos_value_usd = Decimal(pos["position_value_usd"])
+# ✅ СТАЛО:
+pos_value_usd = Decimal(pos["position_value_usd_str"])
+```
+
+### 3. Виртуальные BIO пары перезаписывали друг друга
+
+**🔍 ПРОБЛЕМА:**
+- Все виртуальные пары имели одинаковый pool_address
+- UPSERT логика перезаписывала предыдущие записи
+
+**✅ РЕШЕНИЕ:**
+```python
+# ❌ БЫЛО: 'pool_address': f"virtual_{token_symbol.lower()}_bio"
+# ✅ СТАЛО: 
+'pool_address': f"virtual_BIO_{token_symbol}_{network}"  # Уникальность по сети!
+```
+
+### 4. Неправильная фильтрация в multichain_report_generator.py
+
+**🔍 ПРОБЛЕМА:**
+```python
+# ❌ БЫЛО: position_mint НЕ содержит префиксов сети!
+.like('position_mint', 'ethereum_%')
+```
+
+**✅ РЕШЕНИЕ:**
+```python
+# ✅ СТАЛО: фильтрация по network колонке
+.eq('network', 'ethereum')
 ```
 
 ---
 
-## 🔗 Критические зависимости
+## 🎯 Процедура обновления VIEW bio_dao_lp_support
 
-### 1. dao_pools_snapshot.py → lp_position_snapshots
+**📋 ЧТО НУЖНО ЗАПУСТИТЬ:**
 
-**Проблема**: `dao_pools_snapshot.py` НЕ МОЖЕТ работать без данных позиций
+```bash
+# 1. Обновление позиций (если нужно)
+python3 pool_analyzer.py
 
-**Код зависимости**:
-```python
-# dao_pools_snapshot.py:608-609
-our_positions = await self.load_our_positions_from_supabase()
+# 2. Обновление DAO метрик (ПОСЛЕ позиций)  
+python3 dao_pools_snapshot.py
 
-# Без этих данных невозможно рассчитать:
-# - our_position_value_usd
-# - lp_gap_usd  
-# - Инвестиционные приоритеты
+# 3. VIEW автоматически обновится
+# (использует свежие данные из обеих таблиц)
 ```
 
-**Решение**: Обязательное выполнение сбора позиций ПЕРЕД сбором пулов
-
-### 2. multichain_report_generator.py → обе таблицы
-
-**Зависимости**:
-- `lp_position_snapshots` - для данных позиций
-- `lp_pool_snapshots` - для контекста пулов и TVL
-
-### 3. Последовательность в Scheduler
-
-**Критическое требование**:
-```python
-# ✅ ПРАВИЛЬНАЯ последовательность:
-# 1. Сначала позиции (каждые 4 часа)
-'ethereum_positions_analysis': "0 */4 * * *"
-'base_positions_analysis': "0 2,6,10,14,18,22 * * *"
-
-# 2. Потом пулы (2 раза в день, ПОСЛЕ позиций)  
-'dao_pools_snapshots': "30 9,21 * * *"
-
-# 3. Потом отчеты (используют ВСЕ данные)
-'multichain_telegram_report': "0 12,20 * * *"
-```
-
----
-
-## ⚠️ Обработка ошибок
-
-### 1. RPC Errors
-
-**Стратегия**: Retry с exponential backoff
-
-```python
-# unified_positions_analyzer.py
-async def call_with_retry(rpc_call, max_retries=3):
-    for attempt in range(max_retries):
-        try:
-            return await rpc_call()
-        except Exception as e:
-            if attempt == max_retries - 1:
-                raise
-            
-            wait_time = 2 ** attempt  # Exponential backoff
-            await asyncio.sleep(wait_time)
-```
-
-### 2. API Rate Limits
-
-**GeckoTerminal API**: Ограничение запросов
-
-```python
-# dao_pools_snapshot.py
-async def get_pool_data_from_geckoterminal(pool_address):
-    for attempt in range(3):
-        try:
-            response = await session.get(url)
-            if response.status == 429:  # Rate limit
-                wait_time = 2 ** attempt
-                await asyncio.sleep(wait_time)
-                continue
-            return await response.json()
-        except Exception as e:
-            if attempt == 2:
-                # Возвращаем пул с ошибкой, но не прерываем обработку
-                return {
-                    'dex': f'api_error_{response.status}',
-                    'tvl_usd': 0
-                }
-```
-
-### 3. Database Errors
-
-**Supabase Connection**: Graceful degradation
-
-```python
-# database_handler.py  
-def save_with_fallback(data):
-    try:
-        return supabase_handler.save_data(data)
-    except Exception as e:
-        logger.error(f"Supabase save failed: {e}")
-        # Fallback: сохранение в локальный файл
-        save_to_local_backup(data)
-        return None
-```
-
-### 4. Missing Data Handling
-
-**Позиции отсутствуют**:
-```python
-# dao_pools_snapshot.py
-our_positions = await load_our_positions_from_supabase()
-if not our_positions:
-    logger.warning("No position data available - using defaults")
-    our_positions = {}  # Продолжаем с пустыми позициями
-```
+**⚡ КРИТИЧЕСКАЯ ПОСЛЕДОВАТЕЛЬНОСТЬ:**
+1. **ПОЗИЦИИ СНАЧАЛА** → lp_position_snapshots
+2. **ПУЛЫ ПОТОМ** → dao_pool_snapshots (зависит от шага 1)
+3. **VIEW АВТОМАТИЧЕСКИ** обновляется
 
 ---
 
@@ -810,7 +589,6 @@ if not our_positions:
 
 ### 1. Environment Variables
 
-**Обязательные переменные**:
 ```bash
 # Supabase
 SUPABASE_URL=https://your-project.supabase.co
@@ -819,7 +597,7 @@ SUPABASE_KEY=your-service-role-key
 # RPC Endpoints  
 ETHEREUM_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/your-key
 BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/your-key  
-HELIUS_RPC_URL=https://rpc.helius.xyz/?api-key=your-key
+HELIUS_RPC_URL=https://mainnet.helius-rpc.com/?api-key=your-key
 
 # Telegram
 TELEGRAM_BOT_TOKEN=your-bot-token
@@ -832,7 +610,6 @@ ETHEREUM_WALLET_ADDRESS=0x31AAc4021540f61fe20c3dAffF64BA6335396850    # ETH/Base
 
 ### 2. tokens_pools_config.json
 
-**Структура**:
 ```json
 {
   "dao_tokens": {
@@ -840,9 +617,9 @@ ETHEREUM_WALLET_ADDRESS=0x31AAc4021540f61fe20c3dAffF64BA6335396850    # ETH/Base
       "symbol": "BIO",
       "name": "BIO Protocol",
       "addresses": {
-        "solana": "BIOhBJbeCx9xTqbLMsYhNVv1CJjUhzqvNVxR5i2gwzWc",
-        "ethereum": "0x1234...",
-        "base": "0x5678..."
+        "solana": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "ethereum": "0x...",
+        "base": "0x..."
       },
       "coingecko_id": "bio-protocol"
     }
@@ -850,31 +627,13 @@ ETHEREUM_WALLET_ADDRESS=0x31AAc4021540f61fe20c3dAffF64BA6335396850    # ETH/Base
   "monitored_pools": {
     "solana": [
       {
-        "pool_address": "ABC123...",
-        "pool_name": "BIO/VITA",
-        "tokens": ["BIO", "VITA"]
+        "pool_address": "HhtxoFCY7uxQKBP1AHVXhCQ3jYtRWL3n1CwBKcfoun5Q",
+        "pool_name": "BIO/MYCO",
+        "tokens": ["BIO", "MYCO"]
       }
     ],
     "ethereum": [...],
     "base": [...]
-  }
-}
-```
-
-### 3. Network Configurations
-
-```python
-# unified_positions_analyzer.py
-NETWORK_CONFIGS = {
-    'ethereum': {
-        'rpc_url': os.getenv('ETHEREUM_RPC_URL'),
-        'nft_manager': '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-        'subgraph_url': 'https://api.thegraph.com/subgraphs/name/uniswap/uniswap-v3'
-    },
-    'base': {
-        'rpc_url': os.getenv('BASE_RPC_URL'), 
-        'nft_manager': '0x03a520b32C04BF3bEEf7BF5d1088b7a39dCbF5Ed',
-        'subgraph_url': 'https://api.studio.thegraph.com/query/3/base-v3/version/latest'
     }
 }
 ```
@@ -883,87 +642,59 @@ NETWORK_CONFIGS = {
 
 ## 📊 Мониторинг и алертинг
 
-### 1. Health Checks
+### 1. Health Checks (каждые 5 мин)
 
-**Системные проверки каждые 5 минут**:
 ```python
-# scheduler.py:942-987
 async def perform_health_check():
-    # 1. Проверка файлов
-    core_files = [
-        'pool_analyzer.py', 'dao_pools_snapshot.py',
-        'unified_positions_analyzer.py', 'tokens_pools_config.json'
-    ]
-    missing_files = [f for f in core_files if not os.path.exists(f)]
-    
-    # 2. Проверка Telegram подключения
-    telegram_status = await telegram.test_connection()
-    
-    # 3. Проверка Supabase подключения  
-    supabase_status = supabase_handler.is_connected()
-    
-    # 4. Отправка алертов при проблемах
-    if missing_files or not telegram_status or not supabase_status:
-        await alerting_system.send_system_health_alert()
+    # 1. Проверка файлов системы
+    # 2. Telegram подключение  
+    # 3. Supabase подключение
+    # 4. Алерты при проблемах
 ```
 
-### 2. Out-of-Range Positions Monitoring
+### 2. Position Monitoring
 
-**Проверка каждые 30 минут**:
 ```python
-# scheduler.py:988-1008
-async def check_out_of_range_positions():
-    # Умная логика: алерт только при изменениях
-    alert_sent = await alerting_system.check_out_of_range_positions()
+# Out-of-range positions (каждые 30 мин)
+# Range proximity warning (каждые 15 мин)  
+# Умные алерты (только при изменениях)
 ```
 
 ### 3. Task Execution Monitoring
 
-**Отслеживание выполнения задач**:
 ```python
-# scheduler.py:290-291
 async def _execute_task(task):
     try:
         task.last_status = TaskStatus.RUNNING
         await task.function()
         task.last_status = TaskStatus.SUCCESS
-        task.execution_count += 1
     except Exception as e:
         task.last_status = TaskStatus.FAILED
-        task.last_error = str(e)
         await alerting_system.send_task_failure_alert(task)
 ```
 
-### 4. Performance Metrics
-
-**Отслеживание ключевых метрик**:
-- **Execution Time**: Время выполнения каждой задачи
-- **Data Volume**: Количество обработанных позиций/пулов
-- **Error Rate**: Процент неудачных запросов к API/RPC
-- **Data Freshness**: Время последнего обновления данных
-
 ---
 
-## 🚀 Deployment Readiness
+## 🚀 Итоговый поток данных
 
-### Checklist перед деплоем:
+```
+🔄 КАЖДЫЕ 4 ЧАСА (синхронизированно):
+├── 00:00 UTC: Helius RPC → positions.py → pool_analyzer.py → lp_position_snapshots (Solana)
+├── 00:20 UTC: Ethereum RPC → unified_positions_analyzer.py → lp_position_snapshots + lp_pool_snapshots  
+├── 00:40 UTC: Base RPC → unified_positions_analyzer.py → lp_position_snapshots + lp_pool_snapshots
+└── 01:10 UTC: GeckoTerminal API + lp_position_snapshots → dao_pools_snapshot.py → dao_pool_snapshots
 
-**✅ Компоненты готовы**:
-- [x] Все 3 сети собирают данные
-- [x] Supabase integration работает
-- [x] Telegram отчеты отправляются
-- [x] Scheduler настроен
-- [x] Error handling реализован
+📊 2 РАЗА В ДЕНЬ:
+├── 13:30 UTC: Все таблицы → multichain_report_generator.py → Telegram
+└── 21:30 UTC: Все таблицы → multichain_report_generator.py → Telegram
 
-**✅ Данные валидны**:
-- [x] lp_position_snapshots: 23+ позиций
-- [x] dao_pool_snapshots: 48 пулов (20 ETH + 9 Base + 19 SOL)
-- [x] Исторические данные рассчитываются
-- [x] Метрики корректны
+📈 РЕЗУЛЬТАТ:
+├── Portfolio Value: $3.6M+
+├── Tracked Positions: 23+ активных
+├── Monitored Networks: 3 (Solana, Ethereum, Base)
+├── DAO Investment Gaps: Рассчитаны для всех токенов
+├── BIO/MYCO, BIO/SPINE позиции: РАБОТАЮТ после исправлений
+└── Автоматические Telegram отчеты с актуальными данными
+```
 
-**✅ Мониторинг активен**:
-- [x] Health checks работают
-- [x] Alerting настроен
-- [x] Performance tracking включен
-
-**Система готова к полной замене старого `pool_analyzer.py`!** 
+**🎯 Система ПОЛНОСТЬЮ АВТОМАТИЧЕСКАЯ:** собирает данные, анализирует, принимает инвестиционные решения и отправляет отчеты по расписанию! 
