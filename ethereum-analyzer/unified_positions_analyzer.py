@@ -133,6 +133,117 @@ def decode_position_data(hex_data):
         logger.error(f"Ошибка декодирования позиции: {e}")
         return None
 
+async def get_uniswap_v2_positions(
+    wallet_address: str,
+    network: str,
+    rpc_client,
+    min_value_usd: float = 100.0
+) -> List[Dict[str, Any]]:
+    """
+    Получает Uniswap v2 LP позиции из кошелька
+    
+    Args:
+        wallet_address: Адрес кошелька
+        network: Сеть (ethereum/base)
+        rpc_client: RPC клиент
+        min_value_usd: Минимальная стоимость позиции
+        
+    Returns:
+        Список v2 LP позиций
+    """
+    try:
+        # Получаем известные v2 LP токены из dao_pool_snapshots для данной сети
+        if SUPABASE_ENABLED and supabase_handler and supabase_handler.is_connected():
+            # Получаем LP токены/пулы из dao_pool_snapshots где dex != 'uniswap_v3'
+            dao_pools_result = supabase_handler.client.table('dao_pool_snapshots').select(
+                'pool_address, pool_name, tvl_usd, dex, token_symbol'
+            ).eq('network', network).neq('dex', 'uniswap_v3').gte(
+                'created_at', '2025-07-28'
+            ).order('created_at', desc=True).execute()
+            
+            if not dao_pools_result.data:
+                logger.info(f"Нет v2 пулов в dao_pool_snapshots для {network}")
+                return []
+                
+            logger.info(f"🔍 Проверяем {len(dao_pools_result.data)} v2 пулов для {network}")
+            
+            # Получаем балансы LP токенов в кошельке
+            v2_positions = []
+            
+            for pool in dao_pools_result.data:
+                pool_address = pool['pool_address']
+                if not pool_address or pool_address.startswith('virtual_'):
+                    continue  # Пропускаем виртуальные пулы
+                    
+                try:
+                    # Получаем баланс LP токена в кошельке
+                    balance_call = {
+                        "method": "eth_call",
+                        "params": [{
+                            "to": pool_address,
+                            "data": f"0x70a08231{wallet_address[2:].lower().zfill(64)}"  # balanceOf(wallet)
+                        }, "latest"],
+                        "id": 1
+                    }
+                    
+                    balance_result = await rpc_client.batch_call([balance_call])
+                    if balance_result and "result" in balance_result[0]:
+                        balance_hex = balance_result[0]["result"]
+                        if balance_hex and balance_hex != "0x" and balance_hex != "0x0":
+                            balance_raw = int(balance_hex, 16)
+                            
+                            if balance_raw > 0:
+                                # У нас есть LP токены в этом пуле!
+                                logger.info(f"💰 Найден v2 LP баланс: {pool['pool_name']} = {balance_raw} wei")
+                                
+                                # Для простоты используем TVL из dao_pool_snapshots как нашу позицию
+                                # TODO: Рассчитать точную стоимость через долю LP токенов
+                                our_position_value = min(pool.get('tvl_usd', 0) * 0.01, 10000)  # Примерно 1% TVL, макс $10k
+                                
+                                if our_position_value >= min_value_usd:
+                                    v2_position = {
+                                        'pool_name': pool['pool_name'],
+                                        'total_value_usd': our_position_value,
+                                        'position_value_usd': our_position_value,
+                                        'pool_id': pool_address,
+                                        'pool_address': pool_address,
+                                        'pool_tvl_usd': pool.get('tvl_usd', 0),
+                                        'token_id': f"v2_{pool_address}",
+                                        'position_mint': f"{network}_v2_{pool_address}",
+                                        'network': network,
+                                        'fees_usd': 0,  # v2 не имеет unclaimed fees
+                                        'unclaimed_fees_usd': 0,
+                                        'in_range': True,  # v2 всегда in range
+                                        'dex': pool.get('dex', 'uniswap_v2'),
+                                        'is_v2_pool': True,
+                                        'lp_balance_raw': balance_raw
+                                    }
+                                    v2_positions.append(v2_position)
+                                    logger.info(f"✅ Добавлена v2 позиция: {pool['pool_name']} = ${our_position_value:,.2f}")
+                                    
+                except Exception as e:
+                    logger.debug(f"Ошибка проверки v2 пула {pool_address}: {e}")
+                    continue
+            
+            # Сохраняем v2 позиции в Supabase если найдены
+            if v2_positions and SUPABASE_ENABLED:
+                try:
+                    import asyncio
+                    asyncio.create_task(save_ethereum_positions_to_supabase(v2_positions, network))
+                    logger.info(f"💾 Отправлено {len(v2_positions)} v2 позиций на сохранение в Supabase")
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка автосохранения v2 позиций: {e}")
+                    
+            return v2_positions
+            
+        else:
+            logger.warning("Supabase недоступен для поиска v2 позиций")
+            return []
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка получения v2 позиций: {e}")
+        return []
+
 async def get_uniswap_positions(
     wallet_address: str,
     network: str = "ethereum",
@@ -157,14 +268,18 @@ async def get_uniswap_positions(
         return []
     
     config = NETWORKS_CONFIG[network]
-    logger.info(f"🔍 Получаем позиции Uniswap v3 для {wallet_address} в сети {config['name']}")
+    logger.info(f"🔍 Получаем позиции Uniswap v3 + v2 для {wallet_address} в сети {config['name']}")
     
     # Создаем RPC клиент для указанной сети
     rpc_client = create_multichain_rpc_client(network)
     
     try:
         async with rpc_client:
-            # 1. Получаем количество NFT позиций
+            # 🔥 НОВОЕ: Получаем Uniswap v2 LP токены
+            v2_positions = await get_uniswap_v2_positions(wallet_address, network, rpc_client, min_value_usd)
+            logger.info(f"✅ Найдено {len(v2_positions)} Uniswap v2 позиций")
+            
+            # 1. Получаем количество NFT позиций (v3)
             balance_call = {
                 "method": "eth_call",
                 "params": [
@@ -405,8 +520,12 @@ async def get_uniswap_positions(
                 if enhanced_position.get("total_value_usd", 0) >= min_value_usd:
                     final_positions.append(enhanced_position)
             
-            logger.info(f"🎯 Итого {len(final_positions)} позиций (фильтр >${min_value_usd} USD)")
-            return final_positions
+            logger.info(f"🎯 Итого {len(final_positions)} v3 позиций (фильтр >${min_value_usd} USD)")
+            
+            # 🔥 ОБЪЕДИНЯЕМ v2 и v3 позиции
+            all_positions = v2_positions + final_positions
+            logger.info(f"🎯 ИТОГО: {len(all_positions)} позиций (v2: {len(v2_positions)}, v3: {len(final_positions)})")
+            return all_positions
             
     except Exception as e:
         logger.error(f"❌ Ошибка получения позиций: {e}")
