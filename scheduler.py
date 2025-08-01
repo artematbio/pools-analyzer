@@ -664,37 +664,14 @@ asyncio.run(main())
             raise
     
     async def run_base_positions_analysis(self):
-        """Execute Base positions analysis"""
+        """Execute Base positions analysis with Supabase saving"""
         try:
             logging.info("Starting Base positions analysis...")
             
-            # Create a simple test script for Base
+            # Run the proper unified positions analyzer for Base
             result = subprocess.run([
-                'python3', '-c', 
-                '''
-import asyncio
-import sys
-import os
-sys.path.append("ethereum-analyzer")
-from unified_positions_analyzer import get_uniswap_positions
-
-async def main():
-    wallet = "0x31AAc4021540f61fe20c3dAffF64BA6335396850"
-    try:
-        positions = await get_uniswap_positions(wallet, "base", min_value_usd=0)
-        print(f"Found {len(positions)} Base positions")
-        
-        total_value = sum(pos.get("total_value_usd", 0) for pos in positions)
-        print(f"Total Base positions value: ${total_value:.2f}")
-        
-        for pos in positions[:5]:  # Show top 5
-            print(f"• {pos.get('pool_name', 'Unknown')}: ${pos.get('total_value_usd', 0):.2f}")
-    except Exception as e:
-        print(f"Base analysis temporarily disabled: {e}")
-
-asyncio.run(main())
-                '''
-            ], capture_output=True, text=True, timeout=180)  # 3 minute timeout
+                'python3', 'ethereum-analyzer/unified_positions_analyzer.py', '--network', 'base'
+            ], capture_output=True, text=True, timeout=300)  # 5 minute timeout
             
             if result.returncode != 0:
                 logging.warning(f"Base analysis had issues: {result.stderr}")
