@@ -316,43 +316,8 @@ class MultiChainReportGenerator:
                 'network', 'ethereum'
             ).gte('created_at', '2025-07-28').order('created_at', desc=True).execute()
             
-            # 🔥 ДОБАВЛЯЕМ: Получаем пулы из dao_pool_snapshots (включая Uniswap v2)
-            dao_pools_result = supabase_handler.client.table('dao_pool_snapshots').select('*').like(
-                'pool_name', '%ETH%'  # Ищем пулы с ETH (Ethereum пулы)
-            ).gte('created_at', '2025-07-28').order('created_at', desc=True).execute()
-            
-            print(f"📊 Найдено lp_pool_snapshots Ethereum: {len(pools_result.data if pools_result.data else [])}")
-            print(f"📊 Найдено dao_pool_snapshots Ethereum: {len(dao_pools_result.data if dao_pools_result.data else [])}")
-            
             # Адаптируем данные для совместимости с ReportFormatter
             ethereum_positions = positions_result.data if positions_result.data else []
-            
-            # 🔥 КОНВЕРТИРУЕМ dao_pool_snapshots в позиции (для Uniswap v2 и других пулов)
-            if dao_pools_result.data:
-                for dao_pool in dao_pools_result.data:
-                    our_position_value = dao_pool.get('our_position_value_usd', 0)
-                    if our_position_value and our_position_value >= min_value_usd:
-                        # Создаем позицию из DAO пула
-                        dao_position = {
-                            'pool_name': dao_pool.get('pool_name', 'Unknown Pool'),
-                            'total_value_usd': our_position_value,
-                            'position_value_usd': our_position_value,
-                            'pool_id': dao_pool.get('pool_address', ''),
-                            'pool_address': dao_pool.get('pool_address', ''),
-                            'pool_tvl_usd': dao_pool.get('tvl_usd', 0),
-                            'token_id': f"dao_{dao_pool.get('id', 'unknown')}",
-                            'position_mint': f"ethereum_dao_{dao_pool.get('id', 'unknown')}",
-                            'network': 'ethereum',
-                            'fees_usd': 0,  # DAO пулы не имеют fees
-                            'unclaimed_fees_usd': 0,
-                            'in_range': True,  # DAO пулы всегда "in range"
-                            'dex': dao_pool.get('dex', 'uniswap_v2'),
-                            'is_dao_pool': True  # Флаг для идентификации
-                        }
-                        ethereum_positions.append(dao_position)
-                        print(f"   ✅ Добавлен DAO пул Ethereum: {dao_pool.get('pool_name')} = ${our_position_value:,.2f}")
-                        
-                print(f"📊 Итого Ethereum позиций (с DAO): {len(ethereum_positions)}")
             
             # Фильтруем тестовые данные
             ethereum_positions = [
@@ -452,14 +417,6 @@ class MultiChainReportGenerator:
             pools_result = supabase_handler.client.table('lp_pool_snapshots').select('*').eq(
                 'network', 'base'
             ).gte('created_at', '2025-07-28').order('created_at', desc=True).execute()
-            
-            # 🔥 ДОБАВЛЯЕМ: Получаем пулы из dao_pool_snapshots (включая Uniswap v2)
-            dao_pools_result = supabase_handler.client.table('dao_pool_snapshots').select('*').or_(
-                'pool_name.ilike.*/*ETH*,pool_name.ilike.*WETH*,pool_name.ilike.*BASE*'  # Ищем Base пулы
-            ).gte('created_at', '2025-07-28').order('created_at', desc=True).execute()
-            
-            print(f"📊 Найдено lp_pool_snapshots Base: {len(pools_result.data if pools_result.data else [])}")
-            print(f"📊 Найдено dao_pool_snapshots Base: {len(dao_pools_result.data if dao_pools_result.data else [])}")
             
             # Адаптируем данные для совместимости с ReportFormatter
             base_positions = positions_result.data if positions_result.data else []

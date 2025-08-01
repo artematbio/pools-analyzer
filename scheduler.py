@@ -631,15 +631,23 @@ sys.path.append("ethereum-analyzer")
 from unified_positions_analyzer import get_uniswap_positions
 
 async def main():
-    wallet = "0x31AAc4021540f61fe20c3dAffF64BA6335396850"
-    positions = await get_uniswap_positions(wallet, "ethereum", min_value_usd=0)
-    print(f"Found {len(positions)} Ethereum positions")
-    
-    total_value = sum(pos.get("total_value_usd", 0) for pos in positions)
-    print(f"Total Ethereum positions value: ${total_value:.2f}")
-    
-    for pos in positions[:5]:  # Show top 5
-        print(f"• {pos.get('pool_name', 'Unknown')}: ${pos.get('total_value_usd', 0):.2f}")
+    wallets = ["0x31AAc4021540f61fe20c3dAffF64BA6335396850", "0x5d735a96436a97Be8998a85DFde9240f4136C252"]
+    try:
+        all_positions = []
+        for wallet in wallets:
+            positions = await get_uniswap_positions(wallet, "ethereum", min_value_usd=0)
+            all_positions.extend(positions)
+            print(f"Wallet {wallet}: {len(positions)} позиций")
+        
+        total_value = sum(pos.get("total_value_usd", 0) for pos in all_positions)
+        print(f"✅ Ethereum: найдено {len(all_positions)} позиций, стоимость ${total_value:.2f}")
+        
+        v3_count = len([p for p in all_positions if not p.get('is_v2_pool', False)])
+        v2_count = len([p for p in all_positions if p.get('is_v2_pool', False)])
+        print(f"📊 Из них: v3={v3_count}, v2={v2_count}")
+        
+    except Exception as e:
+        print(f"Ethereum analysis error: {e}")
 
 asyncio.run(main())
                 '''
@@ -668,9 +676,37 @@ asyncio.run(main())
         try:
             logging.info("Starting Base positions analysis...")
             
-            # Run the proper unified positions analyzer for Base
+            # Run the proper unified positions analyzer for Base (временно через простой тест)
             result = subprocess.run([
-                'python3', 'ethereum-analyzer/unified_positions_analyzer.py', '--network', 'base'
+                'python3', '-c', 
+                '''
+import asyncio
+import sys
+import os
+sys.path.append("ethereum-analyzer")
+from unified_positions_analyzer import get_uniswap_positions
+
+async def main():
+    wallets = ["0x31AAc4021540f61fe20c3dAffF64BA6335396850", "0x5d735a96436a97Be8998a85DFde9240f4136C252"]
+    try:
+        all_positions = []
+        for wallet in wallets:
+            positions = await get_uniswap_positions(wallet, "base", min_value_usd=0)
+            all_positions.extend(positions)
+            print(f"Wallet {wallet}: {len(positions)} позиций")
+        
+        total_value = sum(pos.get("total_value_usd", 0) for pos in all_positions)
+        print(f"✅ Base: найдено {len(all_positions)} позиций, стоимость ${total_value:.2f}")
+        
+        v3_count = len([p for p in all_positions if not p.get('is_v2_pool', False)])
+        v2_count = len([p for p in all_positions if p.get('is_v2_pool', False)])
+        print(f"📊 Из них: v3={v3_count}, v2={v2_count}")
+        
+    except Exception as e:
+        print(f"Base analysis error: {e}")
+
+asyncio.run(main())
+                '''
             ], capture_output=True, text=True, timeout=300)  # 5 minute timeout
             
             if result.returncode != 0:
