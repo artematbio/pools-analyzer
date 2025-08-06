@@ -67,15 +67,69 @@ class BioLPAnalyzer:
                 data["bio_lp_support"] = bio_support.data
                 print(f"     ✅ {len(bio_support.data)} записей по BIO LP поддержке")
                 
-                # Считаем общие метрики
-                total_target = sum(float(item.get('target_lp_value_usd', 0) or 0) for item in bio_support.data)
-                total_current = sum(float(item.get('our_position_value_usd', 0) or 0) for item in bio_support.data)
-                total_gap = sum(float(item.get('lp_gap_usd', 0) or 0) for item in bio_support.data)
+                # Улучшенный расчет LP coverage с четкой логикой 1% от FDV
+                total_current = 0
+                total_target_calculated = 0
+                total_target_from_db = 0
+                lp_coverage_by_chain = {}
                 
-                data["market_metrics"]["total_target_lp"] = total_target
+                for item in bio_support.data:
+                    token_symbol = item.get('token_symbol', '')
+                    network = item.get('network', '')
+                    fdv = float(item.get('token_fdv_usd', 0) or 0)
+                    current_lp = float(item.get('our_position_value_usd', 0) or 0)
+                    target_from_db = float(item.get('target_lp_value_usd', 0) or 0)
+                    
+                    # НОВАЯ ЛОГИКА: Target LP = 1% от FDV токена на чейн
+                    target_calculated = fdv * 0.01  # 1% от FDV
+                    
+                    total_current += current_lp
+                    total_target_calculated += target_calculated
+                    total_target_from_db += target_from_db
+                    
+                    # Группируем по чейнам для детального анализа
+                    chain_key = network
+                    if chain_key not in lp_coverage_by_chain:
+                        lp_coverage_by_chain[chain_key] = {
+                            'tokens': [],
+                            'total_fdv': 0,
+                            'total_target_lp': 0,
+                            'total_current_lp': 0,
+                            'coverage_ratio': 0
+                        }
+                    
+                    chain_data = lp_coverage_by_chain[chain_key]
+                    chain_data['tokens'].append({
+                        'symbol': token_symbol,
+                        'fdv': fdv,
+                        'target_lp': target_calculated,
+                        'current_lp': current_lp,
+                        'coverage': (current_lp / target_calculated * 100) if target_calculated > 0 else 0
+                    })
+                    chain_data['total_fdv'] += fdv
+                    chain_data['total_target_lp'] += target_calculated
+                    chain_data['total_current_lp'] += current_lp
+                
+                # Рассчитываем coverage по чейнам
+                for chain_key in lp_coverage_by_chain:
+                    chain_data = lp_coverage_by_chain[chain_key]
+                    chain_data['coverage_ratio'] = (
+                        chain_data['total_current_lp'] / chain_data['total_target_lp'] * 100
+                    ) if chain_data['total_target_lp'] > 0 else 0
+                
+                # Используем улучшенные расчеты
+                total_gap = total_target_calculated - total_current
+                
+                data["market_metrics"]["total_target_lp"] = total_target_calculated
                 data["market_metrics"]["total_current_lp"] = total_current  
                 data["market_metrics"]["total_lp_gap"] = total_gap
-                data["market_metrics"]["lp_coverage_ratio"] = (total_current / total_target * 100) if total_target > 0 else 0
+                data["market_metrics"]["lp_coverage_ratio"] = (total_current / total_target_calculated * 100) if total_target_calculated > 0 else 0
+                data["market_metrics"]["lp_coverage_by_chain"] = lp_coverage_by_chain
+                data["market_metrics"]["target_lp_logic"] = "1% от FDV токена на чейн"
+                
+                print(f"     📊 Target LP (1% FDV): ${total_target_calculated:,.0f}")
+                print(f"     💰 Current LP: ${total_current:,.0f}")
+                print(f"     📈 Coverage: {(total_current / total_target_calculated * 100) if total_target_calculated > 0 else 0:.1f}%")
             
             # 3. Pool Performance - последние снапшоты всех пулов
             print("   🏊 Получаю актуальные Pool snapshots...")
@@ -173,12 +227,29 @@ Total Accumulated Fees: ${data['market_metrics'].get('total_accumulated_fees', 0
         current_lp = data['market_metrics'].get('total_current_lp', 0)
         lp_gap = data['market_metrics'].get('total_lp_gap', 0)
         coverage = data['market_metrics'].get('lp_coverage_ratio', 0)
+        coverage_by_chain = data['market_metrics'].get('lp_coverage_by_chain', {})
         
         prompt += f"\n=== LP COVERAGE ANALYSIS ===\n"
-        prompt += f"Target LP Value: ${target_lp:,.2f}\n"
-        prompt += f"Current LP Value: ${current_lp:,.2f}\n"
-        prompt += f"LP Gap: ${lp_gap:,.2f}\n"
-        prompt += f"Coverage Ratio: {coverage:.1f}%\n"
+        prompt += f"TARGET LIQUIDITY LOGIC: {data['market_metrics'].get('target_lp_logic', 'Not specified')}\n"
+        prompt += f"• Target LP Value: ${target_lp:,.2f} (1% от общего FDV токенов)\n"
+        prompt += f"• Current LP Value: ${current_lp:,.2f}\n"
+        prompt += f"• LP Gap: ${lp_gap:,.2f}\n"
+        prompt += f"• Overall Coverage: {coverage:.1f}%\n\n"
+        
+        # Детальная разбивка по чейнам
+        prompt += "COVERAGE BY BLOCKCHAIN:\n"
+        for chain, chain_data in coverage_by_chain.items():
+            prompt += f"\n{chain.upper()}:\n"
+            prompt += f"  Total FDV: ${chain_data['total_fdv']:,.0f}\n"
+            prompt += f"  Target LP (1%): ${chain_data['total_target_lp']:,.0f}\n"
+            prompt += f"  Current LP: ${chain_data['total_current_lp']:,.0f}\n"
+            prompt += f"  Coverage: {chain_data['coverage_ratio']:.1f}%\n"
+            
+            # Топ-3 токена по coverage
+            tokens_by_coverage = sorted(chain_data['tokens'], key=lambda x: x['coverage'], reverse=True)
+            prompt += f"  Top tokens by coverage:\n"
+            for i, token in enumerate(tokens_by_coverage[:3]):
+                prompt += f"    {i+1}. {token['symbol']}: {token['coverage']:.1f}% (${token['current_lp']:,.0f}/${token['target_lp']:,.0f})\n"
         
         # Топ токены по FDV и изменениям
         prompt += f"\n=== TOKEN PERFORMANCE MATRIX ===\n"
@@ -257,67 +328,60 @@ Total Accumulated Fees: ${data['market_metrics'].get('total_accumulated_fees', 0
         
         return prompt
     
-    def _create_grok_prompt(self, data_prompt: str) -> tuple:
-        """Создает системный и пользовательский промпты для Grok 4"""
+    def _create_grok_prompt(self, data: Dict[str, Any]) -> tuple:
+        """Создает промпт для Grok 4 с фокусом на LP стратегию"""
         
-        system_prompt = """You are an elite DeFi strategist and LP management expert specializing in Bio Protocol ecosystem optimization. Your expertise includes:
+        system_prompt = """You are an elite DeFi strategist and market maker specializing in liquidity provision optimization for biotechnology tokens.
 
-• Liquidity Pool Management & Yield Optimization
-• Market Making Strategy & Price Support Mechanisms  
-• Cross-chain Arbitrage & Capital Efficiency
-• Token Economics & Liquidity Mining Design
-• Risk Management & Impermanent Loss Mitigation
+CORE MISSION: Analyze Bio Protocol ecosystem LP positions and provide actionable recommendations for:
+1. Improving LP efficiency and reducing impermanent loss
+2. Optimizing token price through strategic liquidity management  
+3. Identifying market making opportunities across Solana, Ethereum, and Base
 
-ANALYSIS FRAMEWORK:
-Focus on actionable insights that drive measurable improvements in:
-1. LP Position Performance (ROI, fees generation, IL minimization)
-2. Token Price Support (through strategic liquidity placement)
-3. Market Making Efficiency (spread optimization, inventory management)
-4. Capital Allocation (identifying highest-yield opportunities)
-5. Risk Mitigation (position sizing, range optimization)
+TARGET LIQUIDITY FRAMEWORK:
+- Target LP = 1% of token FDV per blockchain
+- This provides optimal depth for institutional trading
+- Coverage below 50% indicates urgent LP gaps
+- Coverage above 150% may signal over-allocation
 
-OUTPUT REQUIREMENTS:
-• Provide specific, quantified recommendations
-• Identify immediate actionable opportunities  
-• Suggest optimal LP ranges and position sizing
-• Highlight cross-chain arbitrage possibilities
-• Recommend market making improvements
-• Include risk assessment for each suggestion
+KEY STRATEGIC PRINCIPLES:
+- Prioritize high-volume, low-volatility pairs for stable returns
+- Focus on tokens with strong fundamentals and growth potential
+- Consider cross-chain arbitrage opportunities
+- Balance between deep liquidity and capital efficiency
 
-Respond in professional English with clear section headers and bullet points."""
+Provide specific, actionable recommendations with dollar amounts and reasoning."""
 
-        user_prompt = f"""Analyze this comprehensive LP portfolio data and provide strategic recommendations:
+        # Форматируем данные для Grok
+        formatted_data = self._format_lp_intelligence_prompt(data)
+        
+        user_prompt = f"""Analyze this Bio Protocol LP portfolio and provide strategic recommendations:
 
-{data_prompt}
+{formatted_data}
 
-ANALYSIS REQUESTS:
+SPECIFIC ANALYSIS REQUESTED:
 
-🎯 **IMMEDIATE LP OPTIMIZATION OPPORTUNITIES**
-- Which positions should be rebalanced/closed/expanded?
-- Optimal price ranges for new LP positions
-- Capital reallocation recommendations
+1. LP ALLOCATION STRATEGY:
+   - Which tokens/pairs need immediate liquidity increases?
+   - Which pairs are over-allocated and could be reduced?
+   - Optimal LP distribution across chains (Solana vs Ethereum vs Base)
 
-💰 **YIELD ENHANCEMENT STRATEGIES**  
-- Highest-yield LP opportunities in the ecosystem
-- Fee generation optimization tactics
-- Underperforming position improvements
+2. MARKET MAKING OPPORTUNITIES:
+   - High-volume pairs with low LP coverage (arbitrage potential)
+   - Cross-chain imbalances to exploit
+   - Timing recommendations for LP adjustments
 
-📈 **TOKEN PRICE SUPPORT MECHANISMS**
-- Strategic liquidity placement to support BIO price
-- Market making improvements to reduce volatility
-- Cross-chain arbitrage opportunities
+3. RISK MANAGEMENT:
+   - Pairs with high impermanent loss exposure
+   - Volatile tokens requiring active management
+   - Diversification recommendations
 
-⚠️ **RISK MANAGEMENT PRIORITIES**
-- Positions at high IL risk requiring attention
-- Out-of-range positions needing rebalancing
-- Diversification recommendations
+4. SPECIFIC ACTION ITEMS:
+   - Dollar amounts to move between pairs
+   - Priority ranking of LP adjustments
+   - Expected impact on token prices and trading volume
 
-🔄 **MARKET MAKING ENHANCEMENTS**
-- Liquidity gap analysis and filling strategies
-- Spread optimization opportunities
-- Inventory management improvements
-
-Provide specific dollar amounts, percentage targets, and timeline recommendations where applicable."""
+Be specific, quantitative, and actionable. Focus on maximizing returns while supporting token price appreciation."""
 
         return system_prompt, user_prompt
     
@@ -328,7 +392,7 @@ Provide specific dollar amounts, percentage targets, and timeline recommendation
         data_prompt = self._format_lp_intelligence_prompt(data)
         
         # Создаем промпты
-        system_prompt, user_prompt = self._create_grok_prompt(data_prompt)
+        system_prompt, user_prompt = self._create_grok_prompt(data)
         
         headers = {
             "Authorization": f"Bearer {GROK_API_KEY}",
@@ -382,7 +446,20 @@ Provide specific dollar amounts, percentage targets, and timeline recommendation
             "Content-Type": "application/json"
         }
         
-        system_prompt = """You are an elite quantitative DeFi analyst with advanced reasoning capabilities. Provide data-driven insights on LP performance, focusing on mathematical optimization, statistical analysis, and deep logical reasoning of the provided portfolio data. Use step-by-step reasoning to identify optimal strategies."""
+        system_prompt = """You are an elite quantitative DeFi analyst with advanced reasoning capabilities specializing in Bio Protocol ecosystem analysis.
+
+ANALYTICAL FRAMEWORK:
+- Target Liquidity Model: 1% of token FDV per blockchain provides optimal institutional trading depth
+- Coverage Ratios: <50% urgent gaps, 50-100% healthy, >150% potential over-allocation
+- LP Efficiency Metrics: Focus on fees/capital ratio, impermanent loss minimization, volume/liquidity ratio
+
+Use step-by-step reasoning to provide quantitative insights on:
+1. LP capital allocation efficiency across chains (Solana, Ethereum, Base)
+2. Mathematical optimization of position ranges and sizes
+3. Risk-adjusted return calculations for each LP pair
+4. Cross-chain arbitrage opportunities and optimal execution
+
+Provide mathematical models, specific dollar recommendations, and quantified risk assessments."""
         
         payload = {
             "model": "o3",
