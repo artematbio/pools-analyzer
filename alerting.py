@@ -417,26 +417,68 @@ class AlertingSystem:
         """
         try:
             # Import здесь чтобы избежать circular import
-            from pool_analyzer import TARGET_WALLET_ADDRESSES, get_positions_from_multiple_wallets
             from range_proximity_calculator import filter_positions_approaching_bounds
+            from database_handler import supabase_handler
             import httpx
             import os
             
-            # Получаем учетные данные
-            helius_rpc_url = os.getenv('HELIUS_RPC_URL')
-            helius_api_key = os.getenv('HELIUS_API_KEY')
-            
-            if not helius_rpc_url or not helius_api_key:
-                logging.warning("Helius credentials not configured for proximity checks")
+            # Получаем позиции из всех сетей через Supabase (более быстро и надежно)
+            if not supabase_handler or not supabase_handler.is_connected():
+                logging.warning("Supabase не подключен для proximity checks")
                 return False
             
-            # Получаем все позиции
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                all_positions = await get_positions_from_multiple_wallets(
-                    TARGET_WALLET_ADDRESSES, 
-                    helius_rpc_url, 
-                    helius_api_key
-                )
+            # Получаем все позиции из Supabase (с минимальной стоимостью $100)
+            positions_result = supabase_handler.client.table('lp_position_snapshots').select(
+                'position_mint, pool_name, pool_id, network, position_value_usd, tick_lower, tick_upper, created_at'
+            ).gte('position_value_usd', 100).order('created_at', desc=True).execute()
+            
+            if not positions_result.data:
+                logging.info("Нет позиций для proximity проверки")
+                return False
+            
+            # Убираем дублирование - берем только последнюю запись для каждой position_mint
+            unique_positions = {}
+            pool_ids_needed = set()
+            
+            for pos in positions_result.data:
+                pos_mint = pos['position_mint']
+                if pos_mint not in unique_positions:
+                    unique_positions[pos_mint] = pos
+                    pool_ids_needed.add((pos['pool_id'], pos['network']))
+            
+            # Получаем текущие тики пулов из lp_pool_snapshots
+            pool_ticks = {}
+            for pool_id, network in pool_ids_needed:
+                pool_result = supabase_handler.client.table('lp_pool_snapshots').select(
+                    'tick_current'
+                ).eq('pool_address', pool_id).eq('network', network).order(
+                    'created_at', desc=True
+                ).limit(1).execute()
+                
+                if pool_result.data and pool_result.data[0]['tick_current'] is not None:
+                    pool_ticks[(pool_id, network)] = pool_result.data[0]['tick_current']
+            
+            # Адаптируем данные для range_proximity_calculator
+            all_positions = []
+            for pos in unique_positions.values():
+                pool_key = (pos['pool_id'], pos['network'])
+                current_tick = pool_ticks.get(pool_key)
+                
+                # Только позиции с полными данными для proximity расчетов
+                if all(x is not None for x in [pos['tick_lower'], pos['tick_upper'], current_tick]):
+                    adapted_pos = {
+                        'position_mint': pos['position_mint'],
+                        'pool_name': pos['pool_name'],
+                        'network': pos['network'],
+                        'position_value_usd': pos['position_value_usd'],
+                        'tick_lower': pos['tick_lower'],
+                        'tick_upper': pos['tick_upper'],
+                        'current_tick': current_tick,
+                        'fees_usd': 0  # Для совместимости с formatter
+                    }
+                    all_positions.append(adapted_pos)
+            
+            logging.info(f"📊 Range proximity check: {len(all_positions)} позиций из {len(unique_positions)} (Solana: {len([p for p in all_positions if p['network'] == 'solana'])}, Ethereum: {len([p for p in all_positions if p['network'] == 'ethereum'])}, Base: {len([p for p in all_positions if p['network'] == 'base'])})")
             
             # Фильтруем позиции, приближающиеся к границам (5% порог)
             approaching_positions = filter_positions_approaching_bounds(all_positions, threshold_percent=5.0)

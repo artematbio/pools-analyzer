@@ -485,8 +485,7 @@ async def get_uniswap_positions(
                             try:
                                 # Обновляем TVL данные в базе
                                 pool_update_data = {
-                                    'tvl_usd': tvl_usd,
-                                    'last_updated': datetime.now().isoformat()
+                                    'tvl_usd': tvl_usd
                                 }
                                 await update_ethereum_pool_tvl(pool_addr, pool_update_data, network)
                             except Exception as e:
@@ -1884,16 +1883,25 @@ async def update_ethereum_pool_tvl(pool_address: str, update_data: Dict[str, Any
         if not SUPABASE_ENABLED or not supabase_handler or not supabase_handler.is_connected():
             return False
             
-        # Обновляем последнюю запись пула
-        result = supabase_handler.client.table('lp_pool_snapshots').update(update_data).eq(
+        # Сначала находим ID последней записи пула, затем обновляем её
+        latest_pool = supabase_handler.client.table('lp_pool_snapshots').select('id').eq(
             'pool_address', pool_address
         ).eq('network', network).order('created_at', desc=True).limit(1).execute()
+        
+        if not latest_pool.data:
+            logger.warning(f"⚠️ Не найден пул для обновления TVL: {pool_address}")
+            return False
+            
+        pool_id = latest_pool.data[0]['id']
+        
+        # Обновляем по ID
+        result = supabase_handler.client.table('lp_pool_snapshots').update(update_data).eq('id', pool_id).execute()
         
         if result.data:
             logger.info(f"✅ TVL обновлен для пула {pool_address[:8]}...: ${update_data['tvl_usd']:,.0f}")
             return True
         else:
-            logger.warning(f"⚠️ Не найден пул для обновления TVL: {pool_address}")
+            logger.warning(f"⚠️ Не удалось обновить TVL для пула {pool_address}")
             return False
         
     except Exception as e:
