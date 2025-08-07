@@ -137,31 +137,87 @@ class BioLPAnalyzer:
         return market_data
     
     async def validate_tokens_externally(self, tokens_data: List[Dict]) -> Dict[str, Any]:
-        """Сверяет данные токенов с DexScreener для выявления расхождений"""
+        """Сверяет данные токенов с DexScreener, CoinGecko и GeckoTerminal"""
         
         validation_results = {
             "discrepancies": [],
             "missing_listings": [],
             "price_differences": [],
-            "validation_summary": {}
+            "coingecko_data": [],
+            "geckoterminal_pools": [],
+            "validation_summary": {},
+            "market_insights": []
         }
         
         try:
-            print("🔍 Проверяю токены на DexScreener...")
+            print("🔍 Проверяю токены на DexScreener, CoinGecko и GeckoTerminal...")
             
-            # Проверяем только топ-5 токенов по FDV чтобы не перегружать API
+            # Проверяем топ-5 токенов по FDV
             top_tokens = sorted(tokens_data, key=lambda x: float(x.get('FDV', 0) or 0), reverse=True)[:5]
             
+            # Маппинг символов на CoinGecko ID (основные токены)
+            coingecko_mapping = {
+                'VITA': 'vitadao',
+                'HAIR': 'hairdao', 
+                'GROW': 'growdao',
+                'ATH': 'athena-dao',
+                'NEURON': 'neuron'
+            }
+            
+            # 1. Проверяем CoinGecko для основных токенов
             for token in top_tokens:
                 symbol = token.get('Token', '')
-                our_price = token.get('Price', 0)
+                our_price = float(token.get('Price', 0) or 0)
                 our_fdv = float(token.get('FDV', 0) or 0)
                 
-                if not symbol or symbol == 'BIO':  # Пропускаем BIO и пустые
+                if not symbol or symbol == 'BIO':
                     continue
+                    
+                # Проверяем CoinGecko
+                if symbol in coingecko_mapping:
+                    try:
+                        cg_id = coingecko_mapping[symbol]
+                        cg_url = f"https://api.coingecko.com/api/v3/simple/price?ids={cg_id}&vs_currencies=usd&include_market_cap=true&include_24hr_change=true"
+                        
+                        async with httpx.AsyncClient() as client:
+                            response = await client.get(cg_url, timeout=10)
+                            
+                            if response.status_code == 200:
+                                data = response.json()
+                                if cg_id in data:
+                                    cg_price = data[cg_id].get('usd', 0)
+                                    cg_mcap = data[cg_id].get('usd_market_cap', 0)
+                                    cg_24h = data[cg_id].get('usd_24h_change', 0)
+                                    
+                                    validation_results["coingecko_data"].append({
+                                        "token": symbol,
+                                        "our_price": our_price,
+                                        "cg_price": cg_price,
+                                        "our_fdv": our_fdv,
+                                        "cg_mcap": cg_mcap,
+                                        "cg_24h_change": cg_24h,
+                                        "price_diff_pct": abs(our_price - cg_price) / our_price * 100 if our_price > 0 else 0
+                                    })
+                                    
+                                    print(f"     ✅ {symbol} CoinGecko: ${cg_price:.6f} (24h: {cg_24h:+.2f}%)")
+                                    
+                                    # Проверяем расхождения
+                                    if abs(our_price - cg_price) / our_price * 100 > 5:
+                                        validation_results["price_differences"].append({
+                                            "token": symbol,
+                                            "source": "CoinGecko",
+                                            "our_price": our_price,
+                                            "external_price": cg_price,
+                                            "difference_pct": abs(our_price - cg_price) / our_price * 100
+                                        })
+                        
+                        await asyncio.sleep(1)  # Rate limiting
+                    except Exception as e:
+                        print(f"     ❌ Ошибка CoinGecko {symbol}: {e}")
+                
+                # 2. Проверяем DexScreener
                 
                 try:
-                    # DexScreener API для поиска токена
                     search_url = f"https://api.dexscreener.com/latest/dex/search?q={symbol}"
                     
                     async with httpx.AsyncClient() as client:
@@ -172,37 +228,80 @@ class BioLPAnalyzer:
                             pairs = data.get('pairs', [])
                             
                             if pairs:
-                                # Берем первую пару как ссылку
                                 pair = pairs[0]
                                 dex_price = float(pair.get('priceUsd', 0) or 0)
-                                dex_fdv = float(pair.get('fdv', 0) or 0)
+                                dex_volume = float(pair.get('volume', {}).get('h24', 0) or 0)
+                                dex_liquidity = float(pair.get('liquidity', {}).get('usd', 0) or 0)
                                 
-                                # Сравниваем цены (разница > 5%)
-                                if our_price and dex_price:
-                                    price_diff = abs(our_price - dex_price) / our_price * 100
-                                    if price_diff > 5:
-                                        validation_results["price_differences"].append({
-                                            "token": symbol,
-                                            "our_price": our_price,
-                                            "dex_price": dex_price,
-                                            "difference_pct": price_diff
-                                        })
+                                print(f"     ✅ {symbol} DexScreener: ${dex_price:.6f}, объем ${dex_volume:,.0f}, TVL ${dex_liquidity:,.0f}")
                                 
-                                print(f"     ✅ {symbol}: DexScreener найден, цена ${dex_price:.6f}")
+                                # Проверяем расхождения цен
+                                if our_price and dex_price and abs(our_price - dex_price) / our_price * 100 > 5:
+                                    validation_results["price_differences"].append({
+                                        "token": symbol,
+                                        "source": "DexScreener",
+                                        "our_price": our_price,
+                                        "external_price": dex_price,
+                                        "difference_pct": abs(our_price - dex_price) / our_price * 100
+                                    })
+                                
+                                # Оценка ликвидности
+                                if dex_liquidity < our_fdv * 0.005:  # Меньше 0.5% от FDV
+                                    validation_results["market_insights"].append(f"{symbol}: Низкая ликвидность (${dex_liquidity:,.0f} vs цель ${our_fdv*0.01:,.0f})")
+                                
+                                if dex_volume < 1000:  # Объем меньше $1k
+                                    validation_results["market_insights"].append(f"{symbol}: Малый объем торгов (${dex_volume:,.0f}/24ч)")
                             else:
                                 validation_results["missing_listings"].append({
                                     "token": symbol,
                                     "reason": "Not found on DexScreener"
                                 })
                                 print(f"     ⚠️ {symbol}: Не найден на DexScreener")
-                        else:
-                            print(f"     ❌ {symbol}: DexScreener API ошибка {response.status_code}")
-                            
-                    # Пауза между запросами
-                    await asyncio.sleep(1)
-                    
+                        
+                        await asyncio.sleep(1)
+                        
                 except Exception as e:
                     print(f"     ❌ Ошибка проверки {symbol}: {e}")
+            
+            # 3. Проверяем GeckoTerminal для BIO пар
+            try:
+                print("     🦎 Проверяю BIO пары на GeckoTerminal...")
+                
+                # Поиск BIO пар на основных сетях
+                networks = ['eth', 'base', 'solana']
+                
+                for network in networks:
+                    try:
+                        gt_url = f"https://api.geckoterminal.com/api/v2/search/pools?query=BIO&network={network}"
+                        
+                        async with httpx.AsyncClient() as client:
+                            response = await client.get(gt_url, timeout=10)
+                            
+                            if response.status_code == 200:
+                                data = response.json()
+                                pools = data.get('data', [])
+                                
+                                for pool in pools[:2]:  # Топ-2 пула на сеть
+                                    pool_name = pool.get('attributes', {}).get('name', '')
+                                    pool_tvl = float(pool.get('attributes', {}).get('reserve_in_usd', 0) or 0)
+                                    pool_volume = float(pool.get('attributes', {}).get('volume_usd', {}).get('h24', 0) or 0)
+                                    
+                                    validation_results["geckoterminal_pools"].append({
+                                        "network": network,
+                                        "name": pool_name,
+                                        "tvl": pool_tvl,
+                                        "volume_24h": pool_volume
+                                    })
+                                    
+                                    print(f"     ✅ {network.upper()}: {pool_name} TVL ${pool_tvl:,.0f}, объем ${pool_volume:,.0f}")
+                        
+                        await asyncio.sleep(1)
+                        
+                    except Exception as e:
+                        print(f"     ❌ Ошибка GeckoTerminal {network}: {e}")
+                        
+            except Exception as e:
+                print(f"     ❌ Общая ошибка GeckoTerminal: {e}")
                     
         except Exception as e:
             print(f"     ❌ Общая ошибка валидации: {e}")
@@ -602,36 +701,35 @@ Total Accumulated Fees: ${data['market_metrics'].get('total_accumulated_fees', 0
         # Форматируем данные для Grok
         formatted_data = self._format_lp_intelligence_prompt(data)
         
-        user_prompt = f"""Проанализируй данные экосистемы Bio Protocol и дай КРАТКИЕ рекомендации:
+        user_prompt = f"""Проанализируй экосистему Bio Protocol с фокусом на выявление неочевидных проблем и возможностей:
 
 === ДАННЫЕ ===
 {formatted_data}
 
-=== ТРЕБУЕМЫЙ АНАЛИЗ (КРАТКО И КОНКРЕТНО) ===
+=== АНАЛИТИЧЕСКИЙ ОБЗОР ===
 
-🚨 КРИТИЧЕСКИЕ ПРОБЛЕМЫ:
-- Какие токены имеют покрытие LP <50%? Список с разрывами в $.
-- Какие токены отсутствуют на DexScreener/основных DEX?
-- Позиции с высоким риском IL или вне диапазона?
+🔍 СКРЫТЫЕ РИСКИ И ПАТТЕРНЫ:
+- Какие токены могут стать "мертвыми" в ближайшие 2-4 недели?
+- Какие несоответствия между CoinGecko/DexScreener/GeckoTerminal сигнализируют о проблемах?
+- Какие тренды в объемах/ликвидности говорят о будущих проблемах?
 
-💰 НЕМЕДЛЕННЫЕ ДЕЙСТВИЯ (эта неделя):
-- Конкретные $ суммы для выделения из фонда 830M BIO
-- Какие пулы нуждаются в срочном добавлении ликвидности?
-- Приоритеты: 1-3 самых критичных действия
+💰 ОПТИМАЛЬНАЯ АЛЛОКАЦИЯ 830M BIO (эта неделя):
+- Конкретные $ по токенам/пулам с обоснованием ПОЧЕМУ
+- Какие пары могут дать неожиданно высокую доходность?
+- Как соотносятся с общим состоянием рынка (SOL/ETH)?
 
-🤖 ВОЗМОЖНОСТИ АВТОМАТИЗАЦИИ:
-- Простые скрипты для мониторинга/ребалансировки
-- Пороги алертов (цена, объем, покрытие)
-- Обнаружение арбитража между сетями
+🤖 УМНЫЕ АЛЕРТЫ И АВТОМАТИЗАЦИЯ:
+- Какие пороги сигнализируют о начале деградации токена?
+- Как автоматизировать мониторинг расхождений между платформами?
+- Когда следует перераспределять ликвидность между сетями?
 
-📊 МЕТРИКИ УСПЕХА:
-- Целевое покрытие % по сетям
-- Соотношения объем/ликвидность для достижения
-- График следующего обзора
+📊 КЛЮЧЕВЫЕ МЕТРИКИ НА 2-4 НЕДЕЛИ:
+- Какие KPI покажут успешность стратегии?
+- Какой минимальный объем сигнализирует о "здоровом" токене?
+- Как оценить ROI от вложений в ликвидность?
 
-ФОРМАТ: Используй списки, цифры и таблицы. НИКАКИХ длинных объяснений.
-ФОКУС: Практические действия с $ суммами и дедлайнами.
-ДЛИНА: Максимум 300 слов на секцию."""
+ТОН: Практичный аналитик, не пересказ статистики. Выявляй неочевидное и предлагай конкретные действия.
+ДЛИНА: 2000-3000 символов максимум."""
 
         return system_prompt, user_prompt
     
