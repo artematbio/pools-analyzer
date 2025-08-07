@@ -29,6 +29,58 @@ class BioLPAnalyzer:
         self.analysis_time = datetime.utcnow()
         self.market_context = {}
         
+    async def translate_to_russian(self, english_text: str) -> str:
+        """Переводит английский анализ на русский язык"""
+        
+        if not english_text or not GROK_API_KEY:
+            return english_text
+            
+        translation_prompt = f"""Переведи следующий анализ Bio Protocol LP Intelligence на русский язык. 
+Сохрани всю структуру, форматирование, числа и ключевые термины.
+Переводи технические термины корректно для DeFi контекста.
+
+Текст для перевода:
+{english_text}"""
+        
+        headers = {
+            "Authorization": f"Bearer {GROK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "grok-4-0709",
+            "messages": [
+                {"role": "system", "content": "Ты профессиональный переводчик DeFi и криптовалютных текстов. Переводи точно, сохраняя всю структуру и технические термины."},
+                {"role": "user", "content": translation_prompt}
+            ],
+            "max_tokens": 4000,
+            "temperature": 0.1
+        }
+        
+        try:
+            print("🌐 Переводим анализ на русский язык...")
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    GROK_API_URL,
+                    headers=headers,
+                    json=payload,
+                    timeout=120
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if "choices" in data and len(data["choices"]) > 0:
+                        translation = data["choices"][0]["message"]["content"]
+                        print(f"✅ Перевод выполнен ({len(translation)} символов)")
+                        return translation
+                    
+                print(f"❌ Ошибка перевода: {response.status_code} - {response.text}")
+                return english_text
+                
+        except Exception as e:
+            print(f"❌ Ошибка API перевода: {e}")
+            return english_text
+        
     async def get_market_context(self) -> Dict[str, Any]:
         """Получает рыночный контекст SOL/ETH для стратегических решений"""
         
@@ -525,81 +577,61 @@ Total Accumulated Fees: ${data['market_metrics'].get('total_accumulated_fees', 0
     def _create_grok_prompt(self, data: Dict[str, Any]) -> tuple:
         """Создает промпт для Grok 4 с фокусом на LP стратегию"""
         
-        system_prompt = """You are a strategic ecosystem architect for Bio Protocol, thinking like @aberasmussen - proactive, systematic, solution-oriented.
+        system_prompt = """You are a Bio Protocol ecosystem strategist. Be CONCISE and ACTION-FOCUSED.
 
-🧬 BIO PROTOCOL CONTEXT:
-- BIO is the PRIMARY PAIR for all bioDAO tokens (creating ecosystem liquidity depth)
-- 3.32B BIO total supply with strategic tokenomics: 830M BIO (25%) allocated for ecosystem incentives
-- Cross-chain presence: Ethereum (0xcb159...), Base (0x226A2...), Solana (bioJ9JT...)
-- 56% community allocation shows commitment to decentralized ecosystem growth
+CONTEXT:
+- BIO is primary pair for all bioDAO tokens
+- 830M BIO ecosystem fund available (~$6.8M at current prices)
+- Target: 1% FDV liquidity per token per chain
+- Goal: Prevent tokens appearing "dead" or unlisted
 
-🎯 STRATEGIC MISSION (NOT traditional LP optimization):
-Your role is ecosystem strategist ensuring:
-1. Every bioDAO token has HEALTHY, ACTIVE BIO pairs (prevents "dead/stale" appearance)
-2. Tokens remain indexed, listed, trusted across all major platforms
-3. Sustainable liquidity supporting project credibility and institutional access
-4. Systematic prevention of ecosystem degradation
+YOUR ROLE:
+- Identify critical LP gaps and propose specific $ allocations
+- Suggest automation/monitoring systems
+- Focus on immediate actions, not theory
 
-💡 ANALYTICAL FRAMEWORK:
-When analyzing data, ALWAYS:
-- Cross-reference Supabase data with DexScreener/CoinGecko for validation
-- Consider SOL/ETH market conditions for macro context
-- Identify early warning signs of token degradation
-- Think 3 steps ahead to prevent issues before they occur
+OUTPUT REQUIREMENTS:
+- Use bullet points and numbers
+- Provide specific $ amounts from BIO fund
+- Keep sections under 200 words each
+- No lengthy explanations or marketing speak
+- Focus on what to do THIS WEEK
 
-🔧 SOLUTION-ORIENTED THINKING:
-For every issue identified, propose:
-- Specific budget allocation from 830M BIO ecosystem fund
-- Automated systems/scripts to prevent recurrence
-- Implementation timeline with clear success metrics
-- Risk mitigation and contingency plans
-- Cross-venue monitoring and optimization
-
-Think like a senior team member who architects sustainable solutions, not just fixes current problems."""
+Be direct, practical, and quantitative."""
 
         # Форматируем данные для Grok
         formatted_data = self._format_lp_intelligence_prompt(data)
         
-        user_prompt = f"""STRATEGIC ECOSYSTEM ANALYSIS - Bio Protocol LP Intelligence:
+        user_prompt = f"""Analyze Bio Protocol ecosystem data and provide CONCISE, ACTION-FOCUSED recommendations:
 
-=== CURRENT ECOSYSTEM DATA ===
+=== DATA ===
 {formatted_data}
 
-=== STRATEGIC ANALYSIS FRAMEWORK ===
+=== REQUIRED ANALYSIS (BE BRIEF AND SPECIFIC) ===
 
-1. ECOSYSTEM HEALTH ASSESSMENT:
-   - Which bioDAO tokens risk appearing "dead" or "stale" to market participants?
-   - Cross-reference our data with DexScreener/CoinGecko - any discrepancies or missing listings?
-   - Identify tokens with concerning liquidity degradation trends
-   - Assess cross-chain BIO pair health and consistency
+🚨 CRITICAL ISSUES:
+- Which tokens have <50% LP coverage? List with $ gaps.
+- Any tokens missing from DexScreener/major DEXs?
+- Positions with high IL risk or out-of-range?
 
-2. SYSTEMATIC SOLUTION ARCHITECTURE:
-   - Design automated TWAP programs using 830M BIO ecosystem fund
-   - Propose specific $ allocations and implementation mechanisms
-   - Create monitoring systems for slippage/liquidity across all major venues
-   - Suggest partnership/listing initiatives to strengthen ecosystem presence
+💰 IMMEDIATE ACTIONS (This Week):
+- Specific $ amounts to allocate from 830M BIO fund
+- Which pools need urgent liquidity adds?
+- Priority ranking: 1-3 most critical moves
 
-3. MARKET CONTEXT INTEGRATION:
-   - How do current SOL/ETH conditions affect our cross-chain strategy?
-   - Identify opportunities given broader market state
-   - Competitive analysis vs other ecosystem tokens
-   - Optimal timing for major liquidity adjustments
+🤖 AUTOMATION OPPORTUNITIES:
+- Simple scripts for monitoring/rebalancing
+- Alert thresholds (price, volume, coverage)
+- Cross-chain arbitrage detection
 
-4. PREVENTIVE INFRASTRUCTURE DESIGN:
-   - Early warning systems for token degradation (before it becomes visible)
-   - Automated QA processes for listings/metadata integrity
-   - Regular health scoring across all bioDAO tokens
-   - Capital efficiency optimization while maintaining ecosystem goals
+📊 SUCCESS METRICS:
+- Target coverage % by chain
+- Volume/liquidity ratios to achieve
+- Timeline for next review
 
-5. IMPLEMENTATION ROADMAP:
-   - IMMEDIATE actions (this week) with specific $ amounts
-   - SYSTEMATIC improvements (1-3 months) with automation
-   - STRATEGIC positioning (6-12 months) for ecosystem dominance
-   - Success metrics and continuous monitoring framework
-
-THINK LIKE @ABERASMUSSEN: Be proactive, systematic, and solution-focused. Don't just optimize current positions - architect infrastructure that makes Bio Protocol ecosystem antifragile and continuously growing.
-
-Provide specific dollar amounts, automation scripts ideas, partnership suggestions, and implementation steps."""
+FORMAT: Use bullet points, numbers, and tables. NO lengthy explanations or theory.
+FOCUS: Actionable items with $ amounts and deadlines.
+LENGTH: Max 1500 characters per section."""
 
         return system_prompt, user_prompt
     
@@ -719,30 +751,30 @@ Provide mathematical models, specific dollar recommendations, and quantified ris
             telegram = TelegramSender()
             
             # Базовый отчет с ключевыми метриками
-            fallback_report = f"""🧬 <b>BIO PROTOCOL LP REPORT</b>
+            fallback_report = f"""🧬 <b>ОТЧЕТ BIO PROTOCOL LP</b>
 📅 {self.analysis_time.strftime('%d.%m.%Y %H:%M UTC')}
 ⚠️ <i>AI анализ недоступен, показываю базовые данные</i>
 
-💰 <b>PORTFOLIO SUMMARY</b>
-• Total Value: <b>${raw_data['market_metrics'].get('total_position_value', 0):,.0f}</b>
-• Active Positions: <b>{raw_data['market_metrics'].get('total_positions', 0)}</b>
-• In-Range: <b>{raw_data['market_metrics'].get('in_range_ratio', 0):.1f}%</b>
-• Accumulated Fees: <b>${raw_data['market_metrics'].get('total_accumulated_fees', 0):,.2f}</b>
+💰 <b>ПОРТФЕЛЬ</b>
+• Общая стоимость: <b>${raw_data['market_metrics'].get('total_position_value', 0):,.0f}</b>
+• Активных позиций: <b>{raw_data['market_metrics'].get('total_positions', 0)}</b>
+• В диапазоне: <b>{raw_data['market_metrics'].get('in_range_ratio', 0):.1f}%</b>
+• Накопленные комиссии: <b>${raw_data['market_metrics'].get('total_accumulated_fees', 0):,.2f}</b>
 
-🎯 <b>LP COVERAGE</b>
-• Target LP: <b>${raw_data['market_metrics'].get('total_target_lp', 0):,.0f}</b>
-• Current LP: <b>${raw_data['market_metrics'].get('total_current_lp', 0):,.0f}</b>
-• Coverage: <b>{raw_data['market_metrics'].get('lp_coverage_ratio', 0):.1f}%</b>
-• Gap: <b>${raw_data['market_metrics'].get('total_lp_gap', 0):,.0f}</b>
+🎯 <b>ПОКРЫТИЕ LP</b>
+• Целевой LP: <b>${raw_data['market_metrics'].get('total_target_lp', 0):,.0f}</b>
+• Текущий LP: <b>${raw_data['market_metrics'].get('total_current_lp', 0):,.0f}</b>
+• Покрытие: <b>{raw_data['market_metrics'].get('lp_coverage_ratio', 0):.1f}%</b>
+• Разрыв: <b>${raw_data['market_metrics'].get('total_lp_gap', 0):,.0f}</b>
 
-📊 <b>BIO TOKEN</b>
-• Price: <b>${raw_data['market_metrics'].get('bio_price', 0):.6f}</b>
-• 24h Change: <b>{raw_data['market_metrics'].get('bio_24h_change', 0):+.2f}%</b>
+📊 <b>ТОКЕН BIO</b>
+• Цена: <b>${raw_data['market_metrics'].get('bio_price', 0):.6f}</b>
+• Изменение 24ч: <b>{raw_data['market_metrics'].get('bio_24h_change', 0):+.2f}%</b>
 • FDV: <b>${raw_data['market_metrics'].get('bio_fdv', 0):,.0f}</b>
 
-📈 <b>ACTIVE POOLS</b>
-• Total: <b>{len(raw_data['pool_performance'])}</b> pools
-• Networks: Solana, Ethereum, Base
+📈 <b>АКТИВНЫЕ ПУЛЫ</b>
+• Всего: <b>{len(raw_data['pool_performance'])}</b> пулов
+• Сети: Solana, Ethereum, Base
 
 <i>Для полного AI анализа обратитесь к администратору</i>"""
             
@@ -780,11 +812,14 @@ Provide mathematical models, specific dollar recommendations, and quantified ris
                 await telegram.send_message(grok_header)
                 await asyncio.sleep(1)
                 
+                # Переводим на русский
+                russian_analysis = await self.translate_to_russian(grok_analysis)
+                
                 # Разбиваем длинный анализ на части и отправляем БЕЗ HTML разметки
-                grok_parts = self._split_analysis_text(grok_analysis, 3000)
-                for i, part in enumerate(grok_parts):
+                analysis_parts = self._split_analysis_text(russian_analysis, 3000)
+                for i, part in enumerate(analysis_parts):
                     await telegram.send_message(part, parse_mode=None)  # Без HTML
-                    if i < len(grok_parts) - 1:
+                    if i < len(analysis_parts) - 1:
                         await asyncio.sleep(2)
             
             # Отправляем анализ GPT
