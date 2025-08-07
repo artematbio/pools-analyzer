@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Any
 from database_handler import supabase_handler
 from telegram_sender import TelegramSender
+import time
 
 # API конфигурация
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
@@ -26,6 +27,145 @@ class BioLPAnalyzer:
     def __init__(self):
         self.supabase = supabase_handler
         self.analysis_time = datetime.utcnow()
+        self.market_context = {}
+        
+    async def get_market_context(self) -> Dict[str, Any]:
+        """Получает рыночный контекст SOL/ETH для стратегических решений"""
+        
+        market_data = {
+            "sol_price": None,
+            "eth_price": None,
+            "sol_24h_change": None,
+            "eth_24h_change": None,
+            "btc_dominance": None,
+            "total_market_cap": None
+        }
+        
+        try:
+            print("🌍 Получаю рыночный контекст SOL/ETH...")
+            
+            # CoinGecko API для базовых данных
+            coingecko_url = "https://api.coingecko.com/api/v3/simple/price"
+            params = {
+                "ids": "solana,ethereum,bitcoin",
+                "vs_currencies": "usd",
+                "include_24hr_change": "true",
+                "include_market_cap": "true"
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.get(coingecko_url, params=params, timeout=10)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    # SOL данные
+                    if "solana" in data:
+                        market_data["sol_price"] = data["solana"].get("usd")
+                        market_data["sol_24h_change"] = data["solana"].get("usd_24h_change")
+                    
+                    # ETH данные 
+                    if "ethereum" in data:
+                        market_data["eth_price"] = data["ethereum"].get("usd")
+                        market_data["eth_24h_change"] = data["ethereum"].get("usd_24h_change")
+                    
+                    # BTC для контекста
+                    if "bitcoin" in data:
+                        market_data["btc_price"] = data["bitcoin"].get("usd")
+                        market_data["btc_24h_change"] = data["bitcoin"].get("usd_24h_change")
+                    
+                    print(f"     ✅ SOL: ${market_data['sol_price']:.2f} ({market_data['sol_24h_change']:+.2f}%)")
+                    print(f"     ✅ ETH: ${market_data['eth_price']:.2f} ({market_data['eth_24h_change']:+.2f}%)")
+                else:
+                    print(f"     ⚠️ CoinGecko API ошибка: {response.status_code}")
+                    
+        except Exception as e:
+            print(f"     ❌ Ошибка получения рыночных данных: {e}")
+        
+        return market_data
+    
+    async def validate_tokens_externally(self, tokens_data: List[Dict]) -> Dict[str, Any]:
+        """Сверяет данные токенов с DexScreener для выявления расхождений"""
+        
+        validation_results = {
+            "discrepancies": [],
+            "missing_listings": [],
+            "price_differences": [],
+            "validation_summary": {}
+        }
+        
+        try:
+            print("🔍 Проверяю токены на DexScreener...")
+            
+            # Проверяем только топ-5 токенов по FDV чтобы не перегружать API
+            top_tokens = sorted(tokens_data, key=lambda x: float(x.get('FDV', 0) or 0), reverse=True)[:5]
+            
+            for token in top_tokens:
+                symbol = token.get('Token', '')
+                our_price = token.get('Price', 0)
+                our_fdv = float(token.get('FDV', 0) or 0)
+                
+                if not symbol or symbol == 'BIO':  # Пропускаем BIO и пустые
+                    continue
+                
+                try:
+                    # DexScreener API для поиска токена
+                    search_url = f"https://api.dexscreener.com/latest/dex/search?q={symbol}"
+                    
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(search_url, timeout=10)
+                        
+                        if response.status_code == 200:
+                            data = response.json()
+                            pairs = data.get('pairs', [])
+                            
+                            if pairs:
+                                # Берем первую пару как ссылку
+                                pair = pairs[0]
+                                dex_price = float(pair.get('priceUsd', 0) or 0)
+                                dex_fdv = float(pair.get('fdv', 0) or 0)
+                                
+                                # Сравниваем цены (разница > 5%)
+                                if our_price and dex_price:
+                                    price_diff = abs(our_price - dex_price) / our_price * 100
+                                    if price_diff > 5:
+                                        validation_results["price_differences"].append({
+                                            "token": symbol,
+                                            "our_price": our_price,
+                                            "dex_price": dex_price,
+                                            "difference_pct": price_diff
+                                        })
+                                
+                                print(f"     ✅ {symbol}: DexScreener найден, цена ${dex_price:.6f}")
+                            else:
+                                validation_results["missing_listings"].append({
+                                    "token": symbol,
+                                    "reason": "Not found on DexScreener"
+                                })
+                                print(f"     ⚠️ {symbol}: Не найден на DexScreener")
+                        else:
+                            print(f"     ❌ {symbol}: DexScreener API ошибка {response.status_code}")
+                            
+                    # Пауза между запросами
+                    await asyncio.sleep(1)
+                    
+                except Exception as e:
+                    print(f"     ❌ Ошибка проверки {symbol}: {e}")
+                    
+        except Exception as e:
+            print(f"     ❌ Общая ошибка валидации: {e}")
+        
+        # Суммарная статистика
+        validation_results["validation_summary"] = {
+            "tokens_checked": len(top_tokens),
+            "missing_count": len(validation_results["missing_listings"]),
+            "price_discrepancies": len(validation_results["price_differences"]),
+            "health_score": max(0, 100 - (len(validation_results["missing_listings"]) * 20) - (len(validation_results["price_differences"]) * 10))
+        }
+        
+        print(f"     📊 Проверено {len(top_tokens)} токенов, здоровье экосистемы: {validation_results['validation_summary']['health_score']}/100")
+        
+        return validation_results
         
     async def collect_comprehensive_data(self) -> Dict[str, Any]:
         """Собирает полный набор данных для LP анализа"""
@@ -33,13 +173,18 @@ class BioLPAnalyzer:
         print("📊 Собираю комплексные данные для LP анализа...")
         print(f"⏰ Время анализа: {self.analysis_time.strftime('%Y-%m-%d %H:%M UTC')}")
         
+        # Получаем рыночный контекст
+        self.market_context = await self.get_market_context()
+        
         data = {
             "analysis_timestamp": self.analysis_time.isoformat(),
             "dao_tokens_overview": [],
             "bio_lp_support": [],
             "pool_performance": [],
             "position_details": [],
-            "market_metrics": {}
+            "market_metrics": {},
+            "market_context": self.market_context,
+            "external_validation": {}
         }
         
         try:
@@ -50,6 +195,9 @@ class BioLPAnalyzer:
             if dao_dashboard.data:
                 data["dao_tokens_overview"] = dao_dashboard.data
                 print(f"     ✅ {len(dao_dashboard.data)} токенов с историческими данными")
+                
+                # Валидация токенов через внешние источники
+                data["external_validation"] = await self.validate_tokens_externally(dao_dashboard.data)
                 
                 # Извлекаем ключевые метрики
                 bio_token = next((t for t in dao_dashboard.data if 'BIO' in t.get('Token', '')), None)
@@ -145,13 +293,29 @@ class BioLPAnalyzer:
                     if key not in latest_pools:
                         latest_pools[key] = pool
                 
-                # ИСКЛЮЧАЕМ ПУЛЫ С НУЛЕВЫМИ ОБЪЕМАМИ из анализа (проблема с Ethereum/Base)
-                active_pools = [p for p in latest_pools.values() if p.get('volume_24h_usd', 0) > 0]
-                inactive_pools = [p for p in latest_pools.values() if p.get('volume_24h_usd', 0) == 0]
+                # УЛУЧШЕННАЯ ФИЛЬТРАЦИЯ: включаем пулы с TVL > 0 даже если volume = 0
+                # (после исправлений TVL многие пулы получили корректные значения)
+                active_pools = []
+                inactive_pools = []
+                
+                for pool in latest_pools.values():
+                    volume = pool.get('volume_24h_usd', 0) or 0
+                    tvl = pool.get('tvl_usd', 0) or 0
+                    
+                    # Активный пул: есть объем ИЛИ есть значительная ликвидность
+                    if volume > 0 or tvl > 1000:  # TVL > $1k считаем значимым
+                        active_pools.append(pool)
+                    else:
+                        inactive_pools.append(pool)
                 
                 data["pool_performance"] = active_pools
-                print(f"     ✅ {len(active_pools)} активных пулов (объем > $0)")
-                print(f"     ⚠️ {len(inactive_pools)} неактивных пулов исключены из анализа")
+                print(f"     ✅ {len(active_pools)} активных пулов (volume > $0 OR TVL > $1k)")
+                print(f"     ⚠️ {len(inactive_pools)} неактивных пулов исключены")
+                
+                # Статистика по критериям
+                volume_pools = len([p for p in active_pools if p.get('volume_24h_usd', 0) > 0])
+                tvl_only_pools = len([p for p in active_pools if p.get('volume_24h_usd', 0) == 0 and p.get('tvl_usd', 0) > 1000])
+                print(f"     📊 Из них: {volume_pools} с объемом, {tvl_only_pools} только с TVL")
             
             # 4. Position Details - наши текущие позиции
             print("   📍 Получаю актуальные Position snapshots...")
@@ -252,6 +416,36 @@ Total Accumulated Fees: ${data['market_metrics'].get('total_accumulated_fees', 0
                 prompt += f"    {i+1}. {token['symbol']}: {token['coverage']:.1f}% (${token['current_lp']:,.0f}/${token['target_lp']:,.0f})\n"
         
         # Топ токены по FDV и изменениям
+        # Рыночный контекст
+        market_ctx = data.get('market_context', {})
+        if any(market_ctx.values()):
+            prompt += f"\n=== MARKET CONTEXT ===\n"
+            if market_ctx.get('sol_price'):
+                prompt += f"SOL: ${market_ctx['sol_price']:.2f} ({market_ctx.get('sol_24h_change', 0):+.2f}% 24h)\n"
+            if market_ctx.get('eth_price'):
+                prompt += f"ETH: ${market_ctx['eth_price']:.2f} ({market_ctx.get('eth_24h_change', 0):+.2f}% 24h)\n"
+            if market_ctx.get('btc_price'):
+                prompt += f"BTC: ${market_ctx['btc_price']:.2f} ({market_ctx.get('btc_24h_change', 0):+.2f}% 24h)\n"
+        
+        # Внешняя валидация
+        ext_validation = data.get('external_validation', {})
+        if ext_validation:
+            prompt += f"\n=== EXTERNAL VALIDATION (DexScreener) ===\n"
+            summary = ext_validation.get('validation_summary', {})
+            prompt += f"Ecosystem Health Score: {summary.get('health_score', 0)}/100\n"
+            
+            missing = ext_validation.get('missing_listings', [])
+            if missing:
+                prompt += f"\u26a0\ufe0f Missing Listings ({len(missing)}): "
+                prompt += ", ".join([m['token'] for m in missing]) + "\n"
+            
+            price_diffs = ext_validation.get('price_differences', [])
+            if price_diffs:
+                prompt += f"\u26a0\ufe0f Price Discrepancies ({len(price_diffs)}): "
+                for diff in price_diffs:
+                    prompt += f"{diff['token']} ({diff['difference_pct']:.1f}% diff), "
+                prompt = prompt.rstrip(', ') + "\n"
+        
         prompt += f"\n=== TOKEN PERFORMANCE MATRIX ===\n"
         sorted_tokens = sorted(data['dao_tokens_overview'], 
                              key=lambda x: float(x.get('FDV', 0) or 0), reverse=True)
@@ -331,57 +525,81 @@ Total Accumulated Fees: ${data['market_metrics'].get('total_accumulated_fees', 0
     def _create_grok_prompt(self, data: Dict[str, Any]) -> tuple:
         """Создает промпт для Grok 4 с фокусом на LP стратегию"""
         
-        system_prompt = """You are an elite DeFi strategist and market maker specializing in liquidity provision optimization for biotechnology tokens.
+        system_prompt = """You are a strategic ecosystem architect for Bio Protocol, thinking like @aberasmussen - proactive, systematic, solution-oriented.
 
-CORE MISSION: Analyze Bio Protocol ecosystem LP positions and provide actionable recommendations for:
-1. Improving LP efficiency and reducing impermanent loss
-2. Optimizing token price through strategic liquidity management  
-3. Identifying market making opportunities across Solana, Ethereum, and Base
+🧬 BIO PROTOCOL CONTEXT:
+- BIO is the PRIMARY PAIR for all bioDAO tokens (creating ecosystem liquidity depth)
+- 3.32B BIO total supply with strategic tokenomics: 830M BIO (25%) allocated for ecosystem incentives
+- Cross-chain presence: Ethereum (0xcb159...), Base (0x226A2...), Solana (bioJ9JT...)
+- 56% community allocation shows commitment to decentralized ecosystem growth
 
-TARGET LIQUIDITY FRAMEWORK:
-- Target LP = 1% of token FDV per blockchain
-- This provides optimal depth for institutional trading
-- Coverage below 50% indicates urgent LP gaps
-- Coverage above 150% may signal over-allocation
+🎯 STRATEGIC MISSION (NOT traditional LP optimization):
+Your role is ecosystem strategist ensuring:
+1. Every bioDAO token has HEALTHY, ACTIVE BIO pairs (prevents "dead/stale" appearance)
+2. Tokens remain indexed, listed, trusted across all major platforms
+3. Sustainable liquidity supporting project credibility and institutional access
+4. Systematic prevention of ecosystem degradation
 
-KEY STRATEGIC PRINCIPLES:
-- Prioritize high-volume, low-volatility pairs for stable returns
-- Focus on tokens with strong fundamentals and growth potential
-- Consider cross-chain arbitrage opportunities
-- Balance between deep liquidity and capital efficiency
+💡 ANALYTICAL FRAMEWORK:
+When analyzing data, ALWAYS:
+- Cross-reference Supabase data with DexScreener/CoinGecko for validation
+- Consider SOL/ETH market conditions for macro context
+- Identify early warning signs of token degradation
+- Think 3 steps ahead to prevent issues before they occur
 
-Provide specific, actionable recommendations with dollar amounts and reasoning."""
+🔧 SOLUTION-ORIENTED THINKING:
+For every issue identified, propose:
+- Specific budget allocation from 830M BIO ecosystem fund
+- Automated systems/scripts to prevent recurrence
+- Implementation timeline with clear success metrics
+- Risk mitigation and contingency plans
+- Cross-venue monitoring and optimization
+
+Think like a senior team member who architects sustainable solutions, not just fixes current problems."""
 
         # Форматируем данные для Grok
         formatted_data = self._format_lp_intelligence_prompt(data)
         
-        user_prompt = f"""Analyze this Bio Protocol LP portfolio and provide strategic recommendations:
+        user_prompt = f"""STRATEGIC ECOSYSTEM ANALYSIS - Bio Protocol LP Intelligence:
 
+=== CURRENT ECOSYSTEM DATA ===
 {formatted_data}
 
-SPECIFIC ANALYSIS REQUESTED:
+=== STRATEGIC ANALYSIS FRAMEWORK ===
 
-1. LP ALLOCATION STRATEGY:
-   - Which tokens/pairs need immediate liquidity increases?
-   - Which pairs are over-allocated and could be reduced?
-   - Optimal LP distribution across chains (Solana vs Ethereum vs Base)
+1. ECOSYSTEM HEALTH ASSESSMENT:
+   - Which bioDAO tokens risk appearing "dead" or "stale" to market participants?
+   - Cross-reference our data with DexScreener/CoinGecko - any discrepancies or missing listings?
+   - Identify tokens with concerning liquidity degradation trends
+   - Assess cross-chain BIO pair health and consistency
 
-2. MARKET MAKING OPPORTUNITIES:
-   - High-volume pairs with low LP coverage (arbitrage potential)
-   - Cross-chain imbalances to exploit
-   - Timing recommendations for LP adjustments
+2. SYSTEMATIC SOLUTION ARCHITECTURE:
+   - Design automated TWAP programs using 830M BIO ecosystem fund
+   - Propose specific $ allocations and implementation mechanisms
+   - Create monitoring systems for slippage/liquidity across all major venues
+   - Suggest partnership/listing initiatives to strengthen ecosystem presence
 
-3. RISK MANAGEMENT:
-   - Pairs with high impermanent loss exposure
-   - Volatile tokens requiring active management
-   - Diversification recommendations
+3. MARKET CONTEXT INTEGRATION:
+   - How do current SOL/ETH conditions affect our cross-chain strategy?
+   - Identify opportunities given broader market state
+   - Competitive analysis vs other ecosystem tokens
+   - Optimal timing for major liquidity adjustments
 
-4. SPECIFIC ACTION ITEMS:
-   - Dollar amounts to move between pairs
-   - Priority ranking of LP adjustments
-   - Expected impact on token prices and trading volume
+4. PREVENTIVE INFRASTRUCTURE DESIGN:
+   - Early warning systems for token degradation (before it becomes visible)
+   - Automated QA processes for listings/metadata integrity
+   - Regular health scoring across all bioDAO tokens
+   - Capital efficiency optimization while maintaining ecosystem goals
 
-Be specific, quantitative, and actionable. Focus on maximizing returns while supporting token price appreciation."""
+5. IMPLEMENTATION ROADMAP:
+   - IMMEDIATE actions (this week) with specific $ amounts
+   - SYSTEMATIC improvements (1-3 months) with automation
+   - STRATEGIC positioning (6-12 months) for ecosystem dominance
+   - Success metrics and continuous monitoring framework
+
+THINK LIKE @ABERASMUSSEN: Be proactive, systematic, and solution-focused. Don't just optimize current positions - architect infrastructure that makes Bio Protocol ecosystem antifragile and continuously growing.
+
+Provide specific dollar amounts, automation scripts ideas, partnership suggestions, and implementation steps."""
 
         return system_prompt, user_prompt
     
@@ -493,6 +711,48 @@ Provide mathematical models, specific dollar recommendations, and quantified ris
         except Exception as e:
             print(f"❌ Ошибка GPT o3 запроса: {e}")
             return None
+    
+    async def send_fallback_report(self, raw_data: Dict) -> bool:
+        """Отправляет базовый отчет с данными если AI анализ недоступен"""
+        
+        try:
+            telegram = TelegramSender()
+            
+            # Базовый отчет с ключевыми метриками
+            fallback_report = f"""🧬 <b>BIO PROTOCOL LP REPORT</b>
+📅 {self.analysis_time.strftime('%d.%m.%Y %H:%M UTC')}
+⚠️ <i>AI анализ недоступен, показываю базовые данные</i>
+
+💰 <b>PORTFOLIO SUMMARY</b>
+• Total Value: <b>${raw_data['market_metrics'].get('total_position_value', 0):,.0f}</b>
+• Active Positions: <b>{raw_data['market_metrics'].get('total_positions', 0)}</b>
+• In-Range: <b>{raw_data['market_metrics'].get('in_range_ratio', 0):.1f}%</b>
+• Accumulated Fees: <b>${raw_data['market_metrics'].get('total_accumulated_fees', 0):,.2f}</b>
+
+🎯 <b>LP COVERAGE</b>
+• Target LP: <b>${raw_data['market_metrics'].get('total_target_lp', 0):,.0f}</b>
+• Current LP: <b>${raw_data['market_metrics'].get('total_current_lp', 0):,.0f}</b>
+• Coverage: <b>{raw_data['market_metrics'].get('lp_coverage_ratio', 0):.1f}%</b>
+• Gap: <b>${raw_data['market_metrics'].get('total_lp_gap', 0):,.0f}</b>
+
+📊 <b>BIO TOKEN</b>
+• Price: <b>${raw_data['market_metrics'].get('bio_price', 0):.6f}</b>
+• 24h Change: <b>{raw_data['market_metrics'].get('bio_24h_change', 0):+.2f}%</b>
+• FDV: <b>${raw_data['market_metrics'].get('bio_fdv', 0):,.0f}</b>
+
+📈 <b>ACTIVE POOLS</b>
+• Total: <b>{len(raw_data['pool_performance'])}</b> pools
+• Networks: Solana, Ethereum, Base
+
+<i>Для полного AI анализа обратитесь к администратору</i>"""
+            
+            await telegram.send_message(fallback_report)
+            print("✅ Fallback отчет отправлен в Telegram")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Ошибка отправки fallback отчета: {e}")
+            return False
     
     async def send_telegram_report(self, grok_analysis: str, gpt_analysis: str, raw_data: Dict) -> bool:
         """Отправляет анализ в Telegram"""
@@ -633,26 +893,18 @@ async def main():
         
         print(f"\n🚀 Запускаю AI анализ портфеля...")
         
-        # 2. Получаем анализы параллельно
-        grok_task = analyzer.get_grok_lp_analysis(portfolio_data)
-        gpt_task = analyzer.get_gpt_o3_analysis(portfolio_data) if OPENAI_API_KEY else None
+        # 2. Получаем анализ только от Grok (GPT o3 временно исключен)
+        print("📊 Анализ проводится только через Grok 4...")
+        grok_analysis = await analyzer.get_grok_lp_analysis(portfolio_data)
         
-        # Ждем результаты
-        results = await asyncio.gather(
-            grok_task,
-            gpt_task if gpt_task else asyncio.sleep(0),
-            return_exceptions=True
-        )
-        
-        grok_analysis = results[0] if not isinstance(results[0], Exception) else None
-        gpt_analysis = results[1] if gpt_task and not isinstance(results[1], Exception) else None
-        
-        # 3. Сохраняем результаты
-        if grok_analysis or gpt_analysis:
-            await analyzer.send_telegram_report(grok_analysis, gpt_analysis, portfolio_data)
-            
+        # 3. Отправляем результаты
+        if grok_analysis:
+            await analyzer.send_telegram_report(grok_analysis, None, portfolio_data)
+            print("✅ Анализ завершен и отправлен в Telegram")
         else:
-            print("❌ Не удалось получить анализ от AI моделей")
+            print("❌ Не удалось получить анализ от Grok")
+            # Отправляем базовый отчет с данными
+            await analyzer.send_fallback_report(portfolio_data)
     
     except Exception as e:
         print(f"❌ Ошибка: {e}")
