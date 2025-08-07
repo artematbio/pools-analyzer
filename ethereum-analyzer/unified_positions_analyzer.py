@@ -645,7 +645,7 @@ def decode_string_from_hex(hex_str: str) -> str:
         return "Unknown"
 
 async def fetch_token_prices_batch(token_addresses: List[str], network: str = "ethereum") -> Dict[str, Decimal]:
-    """Получает цены токенов через CoinGecko Pro API"""
+    """Получает цены токенов через CoinGecko Pro API с резервными источниками"""
     try:
         import httpx
         
@@ -678,13 +678,47 @@ async def fetch_token_prices_batch(token_addresses: List[str], network: str = "e
             
             # Обрабатываем ответ: {"address": {"usd": price}}
             prices = {}
-            for address, price_data in response_data.items():
-                if "usd" in price_data:
-                    price_decimal = Decimal(str(price_data["usd"]))
-                    prices[address.lower()] = price_decimal
-                    logger.info(f"✅ {address[:8]}...: ${price_decimal}")
-                    
-            logger.info(f"📈 Получено цен токенов: {len(prices)}/{len(token_addresses)}")
+            missing_tokens = []
+            
+            for address in token_addresses:
+                address_lower = address.lower()
+                if address_lower in response_data and "usd" in response_data[address_lower]:
+                    price_decimal = Decimal(str(response_data[address_lower]["usd"]))
+                    prices[address_lower] = price_decimal
+                    logger.info(f"✅ CoinGecko {address[:8]}...: ${price_decimal}")
+                else:
+                    missing_tokens.append(address_lower)
+                    logger.warning(f"⚠️ CoinGecko не нашел цену для {address[:8]}...")
+            
+            # 🔥 РЕЗЕРВНЫЙ ИСТОЧНИК: DexScreener для отсутствующих токенов
+            if missing_tokens:
+                logger.info(f"🔍 Ищем цены для {len(missing_tokens)} токенов через DexScreener...")
+                
+                for token_addr in missing_tokens:
+                    try:
+                        # Поиск токена на DexScreener
+                        search_url = f"https://api.dexscreener.com/latest/dex/tokens/{token_addr}"
+                        dex_response = await client.get(search_url, timeout=10)
+                        
+                        if dex_response.status_code == 200:
+                            dex_data = dex_response.json()
+                            pairs = dex_data.get('pairs', [])
+                            
+                            if pairs:
+                                # Берем цену из первой активной пары
+                                for pair in pairs:
+                                    price_usd = pair.get('priceUsd')
+                                    if price_usd and float(price_usd) > 0:
+                                        price_decimal = Decimal(str(price_usd))
+                                        prices[token_addr] = price_decimal
+                                        logger.info(f"✅ DexScreener {token_addr[:8]}...: ${price_decimal}")
+                                        break
+                                        
+                        await asyncio.sleep(0.5)  # Rate limiting
+                    except Exception as e:
+                        logger.warning(f"⚠️ DexScreener ошибка для {token_addr[:8]}...: {e}")
+                        
+            logger.info(f"📈 Получено цен токенов: {len(prices)}/{len(token_addresses)} (CoinGecko + DexScreener)")
             return prices
         
     except Exception as e:
