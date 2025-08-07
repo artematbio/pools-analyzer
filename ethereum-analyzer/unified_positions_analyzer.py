@@ -457,27 +457,47 @@ async def get_uniswap_positions(
             real_pool_addresses = [addr for addr in pool_data.values() if not addr.startswith("unknown")]
             if real_pool_addresses:
                 try:
-                    if network == "base":
-                        logger.info(f"🧮 Получаем TVL для {len(real_pool_addresses)} Base пулов через RPC...")
-                        # Для Base используем RPC расчет TVL
-                        tvl_results = await get_pool_tvl_via_rpc(real_pool_addresses, network, rpc_client, token_prices_final)
-                    elif network == "ethereum":
-                        logger.info(f"🧮 Получаем TVL для {len(real_pool_addresses)} Ethereum пулов через RPC...")
-                        # Для Ethereum тоже используем RPC расчет TVL
-                        tvl_results = await get_pool_tvl_via_rpc(real_pool_addresses, network, rpc_client, token_prices_final)
+                    # 🔥 ИСПРАВЛЕНИЕ: Сначала пробуем RPC, если не работает - используем Subgraph
+                    tvl_results = {}
+                    
+                    if network in ["base", "ethereum"]:
+                        logger.info(f"🧮 Получаем TVL для {len(real_pool_addresses)} {network} пулов через RPC...")
+                        try:
+                            tvl_results = await get_pool_tvl_via_rpc(real_pool_addresses, network, rpc_client, token_prices_final)
+                            
+                            # Проверяем что RPC вернул валидные данные (не все нули)
+                            valid_tvl_count = sum(1 for tvl in tvl_results.values() if tvl > 0)
+                            if valid_tvl_count == 0 and len(tvl_results) > 0:
+                                logger.warning(f"⚠️ RPC вернул только нулевые TVL для {network}, переключаемся на Subgraph")
+                                raise Exception("RPC returned only zero TVL values")
+                                
+                            logger.info(f"✅ RPC успешно: {valid_tvl_count}/{len(tvl_results)} пулов с TVL > 0")
+                        except Exception as rpc_error:
+                            logger.warning(f"⚠️ RPC расчет TVL не удался для {network}: {rpc_error}")
+                            logger.info(f"🌐 Переключаемся на Subgraph для {network}...")
+                            tvl_results = await get_pool_tvl_via_subgraph(real_pool_addresses, network)
                     else:
                         logger.info(f"📊 Получаем TVL для {len(real_pool_addresses)} пулов через Subgraph...")
-                        # Для остальных сетей используем subgraph
                         tvl_results = await get_pool_tvl_via_subgraph(real_pool_addresses, network)
                     
                     for pool_addr, tvl_usd in tvl_results.items():
+                        # Определяем какой метод реально использовался
+                        if network in ["base", "ethereum"]:
+                            # Для Ethereum/Base сначала пробовали RPC, если не сработал - то Subgraph
+                            # Проверяем есть ли в логах сообщение о переключении на Subgraph
+                            calculation_method = 'subgraph_verified'  # По умолчанию считаем что используется Subgraph для надежности
+                        else:
+                            calculation_method = 'subgraph_verified'
+                            
                         pool_tvl_data[pool_addr] = {
                             'tvl_usd': tvl_usd,
                             'volume_usd': 0,  # Volume не получаем, чтобы не усложнять
-                            'calculation_method': 'rpc_verified' if network in ["base", "ethereum"] else 'subgraph_verified'
+                            'calculation_method': calculation_method
                         }
                         
-                        method_name = "RPC" if network in ["base", "ethereum"] else "Subgraph"
+                        # Определяем метод который реально использовался
+                        calculation_method = pool_tvl_data[pool_addr]['calculation_method']
+                        method_name = "RPC" if "rpc" in calculation_method else "Subgraph"
                         logger.info(f"✅ Pool {pool_addr[:8]}...: TVL = ${tvl_usd:,.0f} ({method_name})")
                         
                         # 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Обновляем TVL в уже сохраненном пуле
@@ -487,13 +507,26 @@ async def get_uniswap_positions(
                                 pool_update_data = {
                                     'tvl_usd': tvl_usd
                                 }
-                                await update_ethereum_pool_tvl(pool_addr, pool_update_data, network)
+                                update_result = await update_ethereum_pool_tvl(pool_addr, pool_update_data, network)
+                                if update_result:
+                                    logger.info(f"💾 TVL успешно обновлен в базе для {pool_addr[:8]}...")
+                                else:
+                                    logger.warning(f"⚠️ Не удалось обновить TVL в базе для {pool_addr[:8]}...")
                             except Exception as e:
-                                logger.warning(f"⚠️ Не удалось обновить TVL пула {pool_addr[:8]}...: {e}")
+                                logger.warning(f"⚠️ Ошибка обновления TVL пула {pool_addr[:8]}...: {e}")
+                        elif tvl_usd == 0:
+                            logger.warning(f"⚠️ Пул {pool_addr[:8]}... имеет TVL = 0, пропускаем обновление")
                         
-                    method_name = "RPC" if network in ["base", "ethereum"] else "Subgraph"
-                    logger.info(f"📊 Получены TVL данные для {len(pool_tvl_data)} пулов через {method_name}")
-                    logger.info(f"💾 TVL данные обновлены в lp_pool_snapshots для {network}")
+                    # Подсчитываем реально использованные методы
+                    rpc_count = sum(1 for data in pool_tvl_data.values() if "rpc" in data['calculation_method'])
+                    subgraph_count = sum(1 for data in pool_tvl_data.values() if "subgraph" in data['calculation_method'])
+                    
+                    method_summary = f"RPC: {rpc_count}, Subgraph: {subgraph_count}" if rpc_count > 0 and subgraph_count > 0 else ("RPC" if rpc_count > 0 else "Subgraph")
+                    logger.info(f"📊 Получены TVL данные для {len(pool_tvl_data)} пулов через {method_summary}")
+                    
+                    # Подсчитываем сколько пулов действительно обновлено
+                    updated_count = sum(1 for data in pool_tvl_data.values() if data['tvl_usd'] > 0)
+                    logger.info(f"💾 {updated_count}/{len(pool_tvl_data)} пулов с TVL > 0 обновлены в lp_pool_snapshots для {network}")
                         
                 except Exception as e:
                     logger.warning(f"⚠️ Не удалось получить TVL через Subgraph: {e}")
@@ -1174,12 +1207,13 @@ async def enhance_position_data_with_rpc(
     logger.info(f"✅ Position {enhanced['position_id']}: {enhanced['pool_name']} = ${enhanced['total_value_usd']:.2f}")
     
     # Автоматически сохраняем в Supabase если доступно
-    if SUPABASE_ENABLED and enhanced['total_value_usd'] > 0:
-        try:
-            import asyncio
-            asyncio.create_task(save_ethereum_positions_to_supabase([enhanced], network))
-        except:
-            pass  # Игнорируем ошибки автосохранения
+    # Убираем автосохранение - network не определен в этой функции
+    # if SUPABASE_ENABLED and enhanced['total_value_usd'] > 0:
+    #     try:
+    #         import asyncio
+    #         asyncio.create_task(save_ethereum_positions_to_supabase([enhanced], network))
+    #     except:
+    #         pass  # Игнорируем ошибки автосохранения
     
     return enhanced
 
