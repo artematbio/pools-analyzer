@@ -577,61 +577,61 @@ Total Accumulated Fees: ${data['market_metrics'].get('total_accumulated_fees', 0
     def _create_grok_prompt(self, data: Dict[str, Any]) -> tuple:
         """Создает промпт для Grok 4 с фокусом на LP стратегию"""
         
-        system_prompt = """You are a Bio Protocol ecosystem strategist. Be CONCISE and ACTION-FOCUSED.
+        system_prompt = """Ты стратег экосистемы Bio Protocol. Будь КРАТКИМ и НАПРАВЛЕННЫМ НА ДЕЙСТВИЯ.
 
-CONTEXT:
-- BIO is primary pair for all bioDAO tokens
-- 830M BIO ecosystem fund available (~$6.8M at current prices)
-- Target: 1% FDV liquidity per token per chain
-- Goal: Prevent tokens appearing "dead" or unlisted
+КОНТЕКСТ:
+- BIO - основная пара для всех bioDAO токенов
+- Доступно 830M BIO из экосистемного фонда (~$6.8M по текущим ценам)
+- Цель: 1% FDV ликвидности на токен на сеть
+- Задача: Предотвратить появление "мертвых" или неработающих токенов
 
-YOUR ROLE:
-- Identify critical LP gaps and propose specific $ allocations
-- Suggest automation/monitoring systems
-- Focus on immediate actions, not theory
+ТВОЯ РОЛЬ:
+- Определи критические пробелы LP и предложи конкретные $ суммы
+- Предложи системы автоматизации/мониторинга
+- Сосредоточься на немедленных действиях, а не на теории
 
-OUTPUT REQUIREMENTS:
-- Use bullet points and numbers
-- Provide specific $ amounts from BIO fund
-- Keep sections under 200 words each
-- No lengthy explanations or marketing speak
-- Focus on what to do THIS WEEK
+ТРЕБОВАНИЯ К ОТВЕТУ:
+- Используй списки и цифры
+- Указывай конкретные $ суммы из BIO фонда
+- Каждая секция максимум 200 слов
+- Никаких длинных объяснений и маркетинговых речей
+- Фокус на том, что делать НА ЭТОЙ НЕДЕЛЕ
 
-Be direct, practical, and quantitative."""
+Будь прямым, практичным и количественным."""
 
         # Форматируем данные для Grok
         formatted_data = self._format_lp_intelligence_prompt(data)
         
-        user_prompt = f"""Analyze Bio Protocol ecosystem data and provide CONCISE, ACTION-FOCUSED recommendations:
+        user_prompt = f"""Проанализируй данные экосистемы Bio Protocol и дай КРАТКИЕ рекомендации:
 
-=== DATA ===
+=== ДАННЫЕ ===
 {formatted_data}
 
-=== REQUIRED ANALYSIS (BE BRIEF AND SPECIFIC) ===
+=== ТРЕБУЕМЫЙ АНАЛИЗ (КРАТКО И КОНКРЕТНО) ===
 
-🚨 CRITICAL ISSUES:
-- Which tokens have <50% LP coverage? List with $ gaps.
-- Any tokens missing from DexScreener/major DEXs?
-- Positions with high IL risk or out-of-range?
+🚨 КРИТИЧЕСКИЕ ПРОБЛЕМЫ:
+- Какие токены имеют покрытие LP <50%? Список с разрывами в $.
+- Какие токены отсутствуют на DexScreener/основных DEX?
+- Позиции с высоким риском IL или вне диапазона?
 
-💰 IMMEDIATE ACTIONS (This Week):
-- Specific $ amounts to allocate from 830M BIO fund
-- Which pools need urgent liquidity adds?
-- Priority ranking: 1-3 most critical moves
+💰 НЕМЕДЛЕННЫЕ ДЕЙСТВИЯ (эта неделя):
+- Конкретные $ суммы для выделения из фонда 830M BIO
+- Какие пулы нуждаются в срочном добавлении ликвидности?
+- Приоритеты: 1-3 самых критичных действия
 
-🤖 AUTOMATION OPPORTUNITIES:
-- Simple scripts for monitoring/rebalancing
-- Alert thresholds (price, volume, coverage)
-- Cross-chain arbitrage detection
+🤖 ВОЗМОЖНОСТИ АВТОМАТИЗАЦИИ:
+- Простые скрипты для мониторинга/ребалансировки
+- Пороги алертов (цена, объем, покрытие)
+- Обнаружение арбитража между сетями
 
-📊 SUCCESS METRICS:
-- Target coverage % by chain
-- Volume/liquidity ratios to achieve
-- Timeline for next review
+📊 МЕТРИКИ УСПЕХА:
+- Целевое покрытие % по сетям
+- Соотношения объем/ликвидность для достижения
+- График следующего обзора
 
-FORMAT: Use bullet points, numbers, and tables. NO lengthy explanations or theory.
-FOCUS: Actionable items with $ amounts and deadlines.
-LENGTH: Max 1500 characters per section."""
+ФОРМАТ: Используй списки, цифры и таблицы. НИКАКИХ длинных объяснений.
+ФОКУС: Практические действия с $ суммами и дедлайнами.
+ДЛИНА: Максимум 300 слов на секцию."""
 
         return system_prompt, user_prompt
     
@@ -812,11 +812,8 @@ Provide mathematical models, specific dollar recommendations, and quantified ris
                 await telegram.send_message(grok_header)
                 await asyncio.sleep(1)
                 
-                # Переводим на русский
-                russian_analysis = await self.translate_to_russian(grok_analysis)
-                
                 # Разбиваем длинный анализ на части и отправляем БЕЗ HTML разметки
-                analysis_parts = self._split_analysis_text(russian_analysis, 3000)
+                analysis_parts = self._split_analysis_text(grok_analysis, 3000)
                 for i, part in enumerate(analysis_parts):
                     await telegram.send_message(part, parse_mode=None)  # Без HTML
                     if i < len(analysis_parts) - 1:
