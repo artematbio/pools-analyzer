@@ -275,9 +275,9 @@ async def get_uniswap_positions(
     
     try:
         async with rpc_client:
-            # 🔥 НОВОЕ: Получаем Uniswap v2 LP токены
-            v2_positions = await get_uniswap_v2_positions(wallet_address, network, rpc_client, min_value_usd)
-            logger.info(f"✅ Найдено {len(v2_positions)} Uniswap v2 позиций")
+            # 🔥 НОВОЕ: Получаем Uniswap V2 LP токены
+            v2_positions = await get_uniswap_v2_positions_new(wallet_address, network, rpc_client, min_value_usd)
+            logger.info(f"✅ Найдено {len(v2_positions)} Uniswap V2 позиций")
             
             # 1. Получаем количество NFT позиций (v3)
             balance_call = {
@@ -557,6 +557,15 @@ async def get_uniswap_positions(
             # 🔥 ОБЪЕДИНЯЕМ v2 и v3 позиции
             all_positions = v2_positions + final_positions
             logger.info(f"🎯 ИТОГО: {len(all_positions)} позиций (v2: {len(v2_positions)}, v3: {len(final_positions)})")
+            
+            # 💾 Сохраняем все позиции в Supabase
+            if all_positions and SUPABASE_ENABLED:
+                try:
+                    saved_count = await save_ethereum_positions_to_supabase(all_positions, network)
+                    logger.info(f"💾 Сохранено {saved_count}/{len(all_positions)} позиций в Supabase для {network}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Ошибка сохранения позиций в Supabase: {e}")
+            
             return all_positions
             
     except Exception as e:
@@ -2192,6 +2201,254 @@ async def get_positions_fees_from_subgraph(
     except Exception as e:
         logger.error(f"❌ Ошибка получения позиций через Subgraph: {e}")
         return {}
+
+async def calculate_v2_position_value(
+    pair_address: str,
+    lp_balance: int, 
+    token0: Dict[str, Any],
+    token1: Dict[str, Any],
+    rpc_client,
+    network: str
+) -> float:
+    """
+    Рассчитывает стоимость V2 LP позиции через reserves и цены токенов
+    
+    Args:
+        pair_address: Адрес V2 пары
+        lp_balance: Количество LP токенов у пользователя
+        token0: Данные первого токена
+        token1: Данные второго токена
+        rpc_client: RPC клиент
+        network: Сеть
+        
+    Returns:
+        Стоимость позиции в USD
+    """
+    try:
+        # Получаем данные пула
+        calls = [
+            {'method': 'eth_call', 'params': [{'to': pair_address, 'data': '0x0902f1ac'}, 'latest'], 'id': 1},  # getReserves
+            {'method': 'eth_call', 'params': [{'to': pair_address, 'data': '0x18160ddd'}, 'latest'], 'id': 2},  # totalSupply
+            {'method': 'eth_call', 'params': [{'to': pair_address, 'data': '0x0dfe1681'}, 'latest'], 'id': 3},  # token0
+            {'method': 'eth_call', 'params': [{'to': pair_address, 'data': '0xd21220a7'}, 'latest'], 'id': 4}   # token1
+        ]
+        
+        results = await rpc_client.batch_call(calls)
+        
+        reserves_hex = results[0]['result']
+        total_supply_hex = results[1]['result']
+        token0_hex = results[2]['result']
+        token1_hex = results[3]['result']
+        
+        reserve0 = int(reserves_hex[2:66], 16)
+        reserve1 = int(reserves_hex[66:130], 16)
+        total_supply = int(total_supply_hex, 16)
+        
+        token0_addr = '0x' + token0_hex[-40:]
+        token1_addr = '0x' + token1_hex[-40:]
+        
+        # Вычисляем нашу долю
+        our_share = lp_balance / total_supply if total_supply > 0 else 0
+        our_token0 = reserve0 * our_share / 1e18
+        our_token1 = reserve1 * our_share / 1e18
+        
+        # Получаем цены токенов - сначала пробуем текущую сеть
+        token_prices = await fetch_token_prices_batch([token0_addr, token1_addr], network)
+        
+        price0 = float(token_prices.get(token0_addr.lower(), 0))
+        price1 = float(token_prices.get(token1_addr.lower(), 0))
+        
+        # Если цены не найдены, ищем по символам в других сетях
+        if price0 == 0 or price1 == 0:
+            # Карта символов к адресам на Ethereum
+            token_map_ethereum = {
+                'bio': '0xcb1592591996765ec0efc1f92599a19767ee5ffa',
+                'ath': '0xa4ffdf3208f46898ce063e25c1c43056fa754739',
+                'neuron': '0xab814ce69e15f6b9660a3b184c0b0c97b9394a6b',
+                'cryo': '0xf4308b0263723b121056938c2172868E408079D0',
+                'psy': '0x2196B84EaCe74867b73fb003AfF93C11FcE1D47A',
+                'vita': '0x81f8f0bb1cb2a06649e51913a151f0e7ef6fa321',
+                'grow': '0x761A3557184cbC07b7493da0661c41177b2f97fA',
+                'hair': '0x9ce115f0341ae5dabc8b477b74e83db2018a6f42',
+                'weth': '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
+            }
+            
+            # Ищем цены на Ethereum по символам
+            if price0 == 0:
+                symbol0 = token0['symbol'].lower()
+                if symbol0 in token_map_ethereum:
+                    eth_prices = await fetch_token_prices_batch([token_map_ethereum[symbol0]], 'ethereum')
+                    if eth_prices:
+                        price0 = float(list(eth_prices.values())[0])
+                        logger.info(f"💰 Цена {token0['symbol']} найдена на Ethereum: ${price0}")
+            
+            if price1 == 0:
+                symbol1 = token1['symbol'].lower()
+                if symbol1 in token_map_ethereum:
+                    eth_prices = await fetch_token_prices_batch([token_map_ethereum[symbol1]], 'ethereum')
+                    if eth_prices:
+                        price1 = float(list(eth_prices.values())[0])
+                        logger.info(f"💰 Цена {token1['symbol']} найдена на Ethereum: ${price1}")
+        
+        # Рассчитываем стоимость
+        value0_usd = our_token0 * price0
+        value1_usd = our_token1 * price1
+        total_value = value0_usd + value1_usd
+        
+        logger.debug(f"V2 позиция {token0['symbol']}/{token1['symbol']}:")
+        logger.debug(f"  Доля: {our_share:.4%}")
+        logger.debug(f"  {token0['symbol']}: {our_token0:,.2f} * ${price0} = ${value0_usd:,.2f}")
+        logger.debug(f"  {token1['symbol']}: {our_token1:,.2f} * ${price1} = ${value1_usd:,.2f}")
+        logger.debug(f"  Итого: ${total_value:,.2f}")
+        
+        return total_value
+        
+    except Exception as e:
+        logger.error(f"Ошибка расчета V2 позиции {pair_address}: {e}")
+        return 0.0
+
+async def get_uniswap_v2_positions_new(
+    wallet_address: str,
+    network: str,
+    rpc_client,
+    min_value_usd: float = 100.0
+) -> List[Dict[str, Any]]:
+    """
+    Получает Uniswap V2 LP позиции из кошелька путем проверки всех возможных пар токенов
+    
+    Args:
+        wallet_address: Адрес кошелька
+        network: Сеть (ethereum/base)
+        rpc_client: RPC клиент
+        min_value_usd: Минимальная стоимость позиции
+        
+    Returns:
+        Список V2 LP позиций
+    """
+    try:
+        import json
+        import os
+        
+        # Загружаем конфигурацию токенов
+        config_path = os.path.join(os.path.dirname(__file__), '..', 'tokens_pools_config.json')
+        with open(config_path, 'r') as f:
+            tokens_config = json.load(f)
+        
+        if network not in tokens_config['tokens']:
+            logger.warning(f"Нет токенов для сети {network}")
+            return []
+            
+        tokens = tokens_config['tokens'][network]
+        logger.info(f"🔍 Проверяем V2 позиции для {len(tokens)} токенов на {network}")
+        
+        # UniV2 Factory адреса
+        factory_addresses = {
+            'ethereum': '0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f',
+            'base': '0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6'
+        }
+        
+        factory_address = factory_addresses.get(network)
+        if not factory_address:
+            logger.warning(f"Нет V2 Factory для сети {network}")
+            return []
+        
+        # Создаем все возможные пары токенов
+        token_pairs = []
+        for i, token0 in enumerate(tokens):
+            for j, token1 in enumerate(tokens):
+                if i < j:  # избегаем дублей
+                    token_pairs.append((token0, token1))
+        
+        logger.info(f"📊 Проверяем {len(token_pairs)} возможных V2 пар")
+        
+        v2_positions = []
+        
+        # Проверяем каждую возможную пару
+        for token0, token1 in token_pairs:
+            try:
+                # getPair(token0, token1) call
+                get_pair_data = f'0xe6a43905{token0["address"][2:].zfill(64)}{token1["address"][2:].zfill(64)}'
+                
+                pair_call = {
+                    'method': 'eth_call',
+                    'params': [{'to': factory_address, 'data': get_pair_data}, 'latest'],
+                    'id': 1
+                }
+                
+                pair_result = await rpc_client.batch_call([pair_call])
+                
+                if pair_result and 'result' in pair_result[0]:
+                    pair_hex = pair_result[0]['result']
+                    if pair_hex and pair_hex != '0x' and len(pair_hex) >= 42 and pair_hex != '0x' + '0' * 40:
+                        pair_address = '0x' + pair_hex[-40:]
+                        
+                        # Проверяем баланс LP токенов в кошельке
+                        balance_data = f'0x70a08231{wallet_address[2:].zfill(64)}'  # balanceOf
+                        
+                        balance_call = {
+                            'method': 'eth_call',
+                            'params': [{'to': pair_address, 'data': balance_data}, 'latest'],
+                            'id': 2
+                        }
+                        
+                        balance_result = await rpc_client.batch_call([balance_call])
+                        
+                        if balance_result and 'result' in balance_result[0]:
+                            balance_hex = balance_result[0]['result']
+                            if balance_hex and balance_hex != '0x' and balance_hex != '0x0':
+                                lp_balance = int(balance_hex, 16)
+                                if lp_balance > 0:
+                                    logger.info(f"🎯 Найдена V2 позиция: {token0['symbol']}/{token1['symbol']}")
+                                    
+                                    # Рассчитываем стоимость позиции
+                                    position_value = await calculate_v2_position_value(
+                                        pair_address, lp_balance, token0, token1, rpc_client, network
+                                    )
+                                    
+                                    if position_value >= min_value_usd:
+                                        v2_position = {
+                                            "position_id": f"v2_{pair_address.lower()}",
+                                            "position_mint": f"{network}_v2_{pair_address.lower()}",
+                                            "network": network,
+                                            "nft_contract": "uniswap_v2_pair",
+                                            "pool_address": pair_address.lower(),
+                                            "pool_id": pair_address.lower(),
+                                            "pool_name": f"{token0['symbol']}/{token1['symbol']}",
+                                            "token0_address": token0['address'].lower(),
+                                            "token1_address": token1['address'].lower(),
+                                            "token0_symbol": token0['symbol'],
+                                            "token1_symbol": token1['symbol'],
+                                            "liquidity": str(lp_balance),
+                                            "total_value_usd": position_value,
+                                            "position_value_usd": position_value,
+                                            "data_source": "uniswap_v2_calculated",
+                                            "calculation_method": "reserves_and_prices",
+                                            "amount0": position_value / 2 if position_value > 0 else 0,
+                                            "amount1": position_value / 2 if position_value > 0 else 0,
+                                            "fee_tier": 0.003,  # V2 фиксированная комиссия 0.3%
+                                            "fees_usd": 0,  # V2 не имеет unclaimed fees
+                                            "unclaimed_fees_usd": 0,
+                                            "in_range": True,  # V2 всегда в диапазоне
+                                            "is_v2_pool": True,
+                                            "dex": "uniswap_v2"
+                                        }
+                                        
+                                        v2_positions.append(v2_position)
+                                        logger.info(f"✅ {token0['symbol']}/{token1['symbol']}: ${position_value:,.2f}")
+                                    else:
+                                        logger.debug(f"⚠️ {token0['symbol']}/{token1['symbol']}: ${position_value:,.2f} < ${min_value_usd} (пропущено)")
+            
+            except Exception as e:
+                logger.debug(f"Ошибка проверки пары {token0.get('symbol', 'UNK')}/{token1.get('symbol', 'UNK')}: {e}")
+                continue
+        
+        logger.info(f"✅ Найдено {len(v2_positions)} Uniswap V2 позиций (>${min_value_usd})")
+        return v2_positions
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка получения V2 позиций: {e}")
+        return []
+
 
 if __name__ == "__main__":
     asyncio.run(test_unified_positions()) 
