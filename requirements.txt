@@ -13,8 +13,6 @@ python-telegram-bot==20.3
 
 # Environment and configuration
 python-dotenv==1.0.0
-asyncio
-decimal
 schedule==1.2.0
 
 # Data processing and analysis (Python 3.12 compatible)
@@ -49,6 +47,4 @@ psycopg2-binary>=2.9.0
 web3>=6.15.0
 eth-typing>=3.5.0
 eth-utils>=2.3.0
-
-# Decimal precision for financial calculations
-# decimal - built-in Python module, no need to install 
+ 
