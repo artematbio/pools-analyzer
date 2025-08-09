@@ -225,14 +225,64 @@ async def get_uniswap_v2_positions(
                     logger.debug(f"Ошибка проверки v2 пула {pool_address}: {e}")
                     continue
             
-            # Сохраняем v2 позиции в Supabase если найдены
+            # 🔥 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Сохраняем V2 ПУЛЫ в lp_pool_snapshots
             if v2_positions and SUPABASE_ENABLED:
                 try:
+                    # 1. Сохраняем V2 пулы в lp_pool_snapshots
+                    logger.info(f"💾 Сохраняем {len(dao_pools_result.data)} V2 пулов {network} в lp_pool_snapshots...")
+                    saved_v2_pools_count = 0
+                    
+                    for pool in dao_pools_result.data:
+                        try:
+                            pool_address = pool['pool_address']
+                            pool_name = pool['pool_name']
+                            tvl_usd = pool.get('tvl_usd', 0) or 0
+                            
+                            # Извлекаем символы токенов из pool_name (например "BIO/VITA")
+                            if '/' in pool_name:
+                                token_symbols = pool_name.split('/')
+                                token0_symbol = token_symbols[0].strip()
+                                token1_symbol = token_symbols[1].strip()
+                            else:
+                                token0_symbol = pool.get('token_symbol', 'UNK')
+                                token1_symbol = 'UNK'
+                            
+                            # Формируем данные V2 пула для сохранения в lp_pool_snapshots
+                            v2_pool_save_data = {
+                                'pool_address': pool_address,
+                                'pool_name': pool_name,
+                                'token0_symbol': token0_symbol,
+                                'token1_symbol': token1_symbol,
+                                'token0_address': None,  # V2 пулы могут не иметь точных адресов токенов
+                                'token1_address': None,
+                                'fee_tier': 3000,  # V2 обычно 0.3%
+                                'tick': None,  # V2 не использует тики
+                                'sqrtPriceX96': None,
+                                'liquidity': None,
+                                'tvl_usd': tvl_usd,
+                                'volume_24h_usd': 0,
+                                'current_price': 0,
+                                'dex': pool.get('dex', 'uniswap_v2')
+                            }
+                            
+                            # Сохраняем V2 пул в lp_pool_snapshots
+                            success = await save_ethereum_pool_to_supabase(v2_pool_save_data, network)
+                            if success:
+                                saved_v2_pools_count += 1
+                                logger.info(f"✅ V2 пул сохранен: {pool_name} = ${tvl_usd:,.0f}")
+                            
+                        except Exception as e:
+                            logger.warning(f"⚠️ Ошибка сохранения V2 пула {pool.get('pool_address', 'N/A')}: {e}")
+                    
+                    logger.info(f"✅ Сохранено {saved_v2_pools_count}/{len(dao_pools_result.data)} V2 пулов в lp_pool_snapshots")
+                    
+                    # 2. Сохраняем V2 позиции в lp_position_snapshots
                     import asyncio
                     asyncio.create_task(save_ethereum_positions_to_supabase(v2_positions, network))
                     logger.info(f"💾 Отправлено {len(v2_positions)} v2 позиций на сохранение в Supabase")
+                    
                 except Exception as e:
-                    logger.warning(f"⚠️ Ошибка автосохранения v2 позиций: {e}")
+                    logger.warning(f"⚠️ Ошибка автосохранения v2 пулов/позиций: {e}")
                     
             return v2_positions
             
@@ -2443,6 +2493,52 @@ async def get_uniswap_v2_positions_new(
                 continue
         
         logger.info(f"✅ Найдено {len(v2_positions)} Uniswap V2 позиций (>${min_value_usd})")
+        
+        # 🔥 НОВОЕ: Сохраняем найденные V2 пулы в lp_pool_snapshots
+        if v2_positions and SUPABASE_ENABLED and supabase_handler and supabase_handler.is_connected():
+            try:
+                logger.info(f"💾 Сохраняем {len(v2_positions)} новых V2 пулов {network} в lp_pool_snapshots...")
+                saved_new_v2_pools_count = 0
+                
+                for position in v2_positions:
+                    try:
+                        # Формируем данные V2 пула для сохранения в lp_pool_snapshots
+                        v2_pool_save_data = {
+                            'pool_address': position['pool_address'],
+                            'pool_name': position['pool_name'],
+                            'token0_symbol': position['token0_symbol'],
+                            'token1_symbol': position['token1_symbol'],
+                            'token0_address': position['token0_address'],
+                            'token1_address': position['token1_address'],
+                            'fee_tier': 3000,  # V2 = 0.3%
+                            'tick': None,  # V2 не использует тики
+                            'sqrtPriceX96': None,
+                            'liquidity': position.get('liquidity'),
+                            'tvl_usd': position['total_value_usd'],  # Используем наше position value как минимальный TVL
+                            'volume_24h_usd': 0,
+                            'current_price': 0,
+                            'dex': 'uniswap_v2'
+                        }
+                        
+                        # Сохраняем V2 пул в lp_pool_snapshots
+                        success = await save_ethereum_pool_to_supabase(v2_pool_save_data, network)
+                        if success:
+                            saved_new_v2_pools_count += 1
+                            logger.info(f"✅ Новый V2 пул сохранен: {position['pool_name']} = ${position['total_value_usd']:,.0f}")
+                        
+                    except Exception as e:
+                        logger.warning(f"⚠️ Ошибка сохранения нового V2 пула {position.get('pool_address', 'N/A')}: {e}")
+                
+                logger.info(f"✅ Сохранено {saved_new_v2_pools_count}/{len(v2_positions)} новых V2 пулов в lp_pool_snapshots")
+                
+                # Также сохраняем позиции
+                import asyncio
+                asyncio.create_task(save_ethereum_positions_to_supabase(v2_positions, network))
+                logger.info(f"💾 Отправлено {len(v2_positions)} новых V2 позиций на сохранение")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка автосохранения новых V2 пулов/позиций: {e}")
+        
         return v2_positions
         
     except Exception as e:
