@@ -446,17 +446,52 @@ class AlertingSystem:
                     unique_positions[pos_mint] = pos
                     pool_ids_needed.add((pos['pool_id'], pos['network']))
             
-            # Получаем текущие тики пулов из lp_pool_snapshots
+            # 🔧 ИСПРАВЛЕНИЕ: Получаем текущие тики пулов (гибридный подход)
             pool_ticks = {}
             for pool_id, network in pool_ids_needed:
-                pool_result = supabase_handler.client.table('lp_pool_snapshots').select(
-                    'tick_current'
-                ).eq('pool_address', pool_id).eq('network', network).order(
-                    'created_at', desc=True
-                ).limit(1).execute()
-                
-                if pool_result.data and pool_result.data[0]['tick_current'] is not None:
-                    pool_ticks[(pool_id, network)] = pool_result.data[0]['tick_current']
+                if network in ['ethereum', 'base']:
+                    # Ethereum/Base: используем tick_current из lp_pool_snapshots
+                    pool_result = supabase_handler.client.table('lp_pool_snapshots').select(
+                        'tick_current'
+                    ).eq('pool_address', pool_id).eq('network', network).order(
+                        'created_at', desc=True
+                    ).limit(1).execute()
+                    
+                    if pool_result.data and pool_result.data[0]['tick_current'] is not None:
+                        pool_ticks[(pool_id, network)] = pool_result.data[0]['tick_current']
+                        
+                elif network == 'solana':
+                    # Solana: аппроксимируем current_tick из позиций (tick_current всегда None)
+                    solana_positions = supabase_handler.client.table('lp_position_snapshots').select(
+                        'tick_lower, tick_upper, in_range, current_price, created_at'
+                    ).eq('pool_id', pool_id).eq('network', network).order(
+                        'created_at', desc=True
+                    ).limit(5).execute()
+                    
+                    if solana_positions.data:
+                        # Используем самую свежую позицию для аппроксимации
+                        latest_pos = solana_positions.data[0]
+                        tick_lower = latest_pos.get('tick_lower')
+                        tick_upper = latest_pos.get('tick_upper') 
+                        in_range = latest_pos.get('in_range')
+                        
+                        if tick_lower is not None and tick_upper is not None:
+                            if in_range:
+                                # Позиция в диапазоне - аппроксимируем середину
+                                estimated_tick = (tick_lower + tick_upper) // 2
+                            else:
+                                # Позиция вне диапазона - ищем другие позиции для уточнения
+                                out_of_range_positions = [p for p in solana_positions.data if not p.get('in_range', True)]
+                                if out_of_range_positions:
+                                    # Если несколько позиций вне диапазона, берем тик ниже самого нижнего
+                                    min_tick_lower = min(p.get('tick_lower', 999999) for p in out_of_range_positions if p.get('tick_lower'))
+                                    estimated_tick = min_tick_lower - 100  # Значительно ниже диапазона
+                                else:
+                                    # Единственная позиция вне диапазона - предполагаем ниже
+                                    estimated_tick = tick_lower - 50
+                            
+                            pool_ticks[(pool_id, network)] = estimated_tick
+                            logging.info(f"🔧 Solana {pool_id[:8]}... estimated tick: {estimated_tick} (in_range: {in_range})")
             
             # Адаптируем данные для range_proximity_calculator
             all_positions = []
