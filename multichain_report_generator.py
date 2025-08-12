@@ -298,10 +298,10 @@ class MultiChainReportGenerator:
             
             print("🗄️ Получаем данные Ethereum из Supabase...")
             
-            # ✅ ИСПРАВЛЕНО: Получаем позиции по network, а не по префиксу position_mint
+            # ✅ ИСПРАВЛЕНО: Получаем ВСЕ позиции, потом фильтруем активные после дедупликации
             positions_result = supabase_handler.client.table('lp_position_snapshots').select('*').eq(
                 'network', 'ethereum'
-            ).gte('position_value_usd', min_value_usd).order('created_at', desc=True).execute()
+            ).order('created_at', desc=True).execute()
             
             # Убираем дублирование - берем только последнюю запись для каждой position_mint
             unique_positions = {}
@@ -309,7 +309,11 @@ class MultiChainReportGenerator:
                 pos_mint = pos['position_mint']
                 if pos_mint not in unique_positions:
                     unique_positions[pos_mint] = pos
-            positions_result.data = list(unique_positions.values())
+            
+            # Фильтруем активные позиции ПОСЛЕ дедупликации
+            active_positions = [pos for pos in unique_positions.values() 
+                              if pos.get('position_value_usd', 0) >= min_value_usd]
+            positions_result.data = active_positions
             
             # Получаем данные пулов для контекста
             pools_result = supabase_handler.client.table('lp_pool_snapshots').select('*').eq(
@@ -400,10 +404,10 @@ class MultiChainReportGenerator:
             
             print("🗄️ Получаем данные Base из Supabase...")
             
-            # ✅ ИСПРАВЛЕНО: Получаем позиции по network, а не по префиксу position_mint
+            # ✅ ИСПРАВЛЕНО: Получаем ВСЕ позиции, потом фильтруем активные после дедупликации
             positions_result = supabase_handler.client.table('lp_position_snapshots').select('*').eq(
                 'network', 'base'
-            ).gte('position_value_usd', min_value_usd).order('created_at', desc=True).execute()
+            ).order('created_at', desc=True).execute()
             
             # Убираем дублирование - берем только последнюю запись для каждой position_mint
             unique_positions = {}
@@ -411,7 +415,11 @@ class MultiChainReportGenerator:
                 pos_mint = pos['position_mint']
                 if pos_mint not in unique_positions:
                     unique_positions[pos_mint] = pos
-            positions_result.data = list(unique_positions.values())
+            
+            # Фильтруем активные позиции ПОСЛЕ дедупликации
+            active_positions = [pos for pos in unique_positions.values() 
+                              if pos.get('position_value_usd', 0) >= min_value_usd]
+            positions_result.data = active_positions
             
             # Получаем данные пулов для контекста
             pools_result = supabase_handler.client.table('lp_pool_snapshots').select('*').eq(

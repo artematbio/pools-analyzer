@@ -37,6 +37,15 @@ class DAOPoolsSnapshotGenerator:
         
         # Загружаем белый список известных адресов пулов
         self._load_known_pool_addresses()
+        
+        # Инициализируем новый агрегатор данных токенов
+        try:
+            from token_data_aggregator import TokenDataAggregator
+            self.token_aggregator = TokenDataAggregator()
+            print("✅ TokenDataAggregator инициализирован (только CoinGecko с max_supply)")
+        except ImportError as e:
+            print(f"⚠️ TokenDataAggregator недоступен: {e}")
+            self.token_aggregator = None
     
     def _load_known_pool_addresses(self):
         """Загружает белый список известных адресов пулов из tokens_pools_config.json"""
@@ -313,41 +322,81 @@ class DAOPoolsSnapshotGenerator:
         return fallback_price
 
     async def _fetch_missing_fdv_from_api(self, dao_tokens: Dict[str, Dict[str, Any]]):
-        """Получить актуальные FDV через GeckoTerminal API (максимальный из всех сетей)"""
-        print("🔍 Получаем актуальные FDV через GeckoTerminal API...")
+        """
+        ОБНОВЛЕННАЯ ЛОГИКА: Получаем FDV через основной CoinGecko API (с max_supply)
+        Fallback: GeckoTerminal API для цен
+        """
+        print("🔍 Получаем актуальные FDV через основной CoinGecko API (price × max_supply)...")
         
-        async with httpx.AsyncClient() as client:
-            for token_symbol, token_info in dao_tokens.items():
-                # ВСЕГДА обновляем FDV для получения актуальных данных
-                best_fdv = 0
-                best_price = 0
-                best_network = None
+        # 1. ПРИОРИТЕТ: Основной CoinGecko API с max_supply
+        if self.token_aggregator:
+            try:
+                token_symbols = list(dao_tokens.keys())
+                aggregated_data = await self.token_aggregator.get_comprehensive_token_data(token_symbols)
                 
-                # Проверяем все сети и выбираем максимальный FDV
-                for network, address in token_info['addresses'].items():
-                    if not address:
-                        continue
+                print(f"✅ Получено данных от CoinGecko для {len(aggregated_data)} токенов")
+                
+                # Обновляем dao_tokens актуальными данными
+                for token_symbol, token_data in aggregated_data.items():
+                    if token_symbol in dao_tokens:
+                        # Обновляем FDV (price × max_supply), MC и цену
+                        dao_tokens[token_symbol]['fdv_usd'] = token_data.get('fully_diluted_valuation', 0)
+                        dao_tokens[token_symbol]['market_cap_usd'] = token_data.get('market_cap', 0)
+                        dao_tokens[token_symbol]['price_usd'] = token_data.get('price_usd', 0)
+                        dao_tokens[token_symbol]['data_source'] = 'coingecko_main_api'
                         
-                    try:
-                        network_map = {'ethereum': 'eth', 'base': 'base', 'solana': 'solana'}
-                        network_id = network_map.get(network, network)
-                        
-                        url = f'https://api.geckoterminal.com/api/v2/networks/{network_id}/tokens/{address}'
-                        response = await client.get(url, timeout=10)
-                        
-                        if response.status_code == 200:
-                            data = response.json()
-                            attrs = data.get('data', {}).get('attributes', {})
+                        print(f"   ✅ {token_symbol}: FDV ${token_data.get('fully_diluted_valuation', 0):,.0f}, "
+                              f"MC ${token_data.get('market_cap', 0):,.0f}, "
+                              f"Price ${token_data.get('price_usd', 0):.6f}")
+                
+                # Если большинство токенов получены - выходим
+                tokens_with_fdv = sum(1 for t in dao_tokens.values() if t.get('fdv_usd', 0) > 0)
+                if tokens_with_fdv >= len(dao_tokens) * 0.8:  # 80% токенов получены
+                    print(f"✅ CoinGecko API успешно получил данные для {tokens_with_fdv}/{len(dao_tokens)} токенов")
+                    return
+                    
+            except Exception as e:
+                print(f"⚠️ Ошибка CoinGecko API: {e}")
+        
+        # 2. FALLBACK: GeckoTerminal API только для токенов БЕЗ данных
+        tokens_needing_data = [symbol for symbol, data in dao_tokens.items() 
+                              if data.get('fdv_usd', 0) == 0 or data.get('market_cap_usd', 0) == 0]
+        
+        if tokens_needing_data:
+            print(f"🔄 Fallback: GeckoTerminal API для {len(tokens_needing_data)} недостающих токенов...")
+            async with httpx.AsyncClient() as client:
+                for token_symbol in tokens_needing_data:
+                    token_info = dao_tokens[token_symbol]
+                    # Обновляем FDV только для токенов БЕЗ данных
+                    best_fdv = 0
+                    best_price = 0
+                    best_network = None
+                
+                    # Проверяем все сети и выбираем максимальный FDV
+                    for network, address in token_info['addresses'].items():
+                        if not address:
+                            continue
                             
-                            # Получаем цену и supply данные
-                            price_usd = attrs.get('price_usd')
-                            max_supply = attrs.get('max_supply')  
-                            total_supply = attrs.get('normalized_total_supply')  # Используем нормализованное значение
+                        try:
+                            network_map = {'ethereum': 'eth', 'base': 'base', 'solana': 'solana'}
+                            network_id = network_map.get(network, network)
                             
-                            # Рассчитываем FDV по формуле вместо использования готового fdv_usd
-                            calculated_fdv = 0
-                            if price_usd:
-                                price = float(price_usd)
+                            url = f'https://api.geckoterminal.com/api/v2/networks/{network_id}/tokens/{address}'
+                            response = await client.get(url, timeout=10)
+                            
+                            if response.status_code == 200:
+                                data = response.json()
+                                attrs = data.get('data', {}).get('attributes', {})
+                                
+                                # Получаем цену и supply данные
+                                price_usd = attrs.get('price_usd')
+                                max_supply = attrs.get('max_supply')  
+                                total_supply = attrs.get('normalized_total_supply')  # Используем нормализованное значение
+                                
+                                # Рассчитываем FDV по формуле вместо использования готового fdv_usd
+                                calculated_fdv = 0
+                                if price_usd:
+                                    price = float(price_usd)
                                 
                                 # FDV = price × max_supply, если max_supply есть
                                 if max_supply and max_supply != "0":
@@ -376,12 +425,12 @@ class DAOPoolsSnapshotGenerator:
                                 
                                 # Краткая диагностика
                                 print(f"   ✅ {token_symbol} ({network}): FDV ${calculated_fdv:,.0f} (source: {supply_source})")
-                        
-                        # Задержка между запросами
-                        await asyncio.sleep(0.3)
-                        
-                    except Exception as e:
-                        print(f"   ⚠️ {token_symbol} ({network}): {e}")
+                            
+                            # Задержка между запросами
+                            await asyncio.sleep(0.3)
+                            
+                        except Exception as e:
+                            print(f"   ⚠️ {token_symbol} ({network}): {e}")
                 
                 # Сохраняем лучшие данные
                 if best_fdv > 0:
@@ -633,12 +682,14 @@ class DAOPoolsSnapshotGenerator:
                     dao_metrics = self.calculate_pool_dao_metrics(updated_pool, dao_token_info, our_positions)
                     token_symbol = dao_token_info['symbol']
                     token_fdv_usd = dao_token_info['fdv_usd']
+                    token_mc_usd = dao_token_info.get('market_cap_usd', 0)  # НОВОЕ ПОЛЕ MC!
                     token_price_usd = dao_token_info['price_usd']
                 else:
                     # Если DAO токен не найден, создаем базовые метрики
                     dao_metrics = self._create_basic_pool_metrics(updated_pool, our_positions)
                     token_symbol = self._extract_token_from_pool_name(updated_pool['pool_name'])
                     token_fdv_usd = 0
+                    token_mc_usd = 0  # НОВОЕ ПОЛЕ MC!
                     token_price_usd = 0
                 
                 # Создаем полную запись снапшота
@@ -655,6 +706,7 @@ class DAOPoolsSnapshotGenerator:
                     'volume_24h_usd': updated_pool['volume_24h_usd'],
                     'token_price_usd': token_price_usd,
                     'token_fdv_usd': token_fdv_usd,
+                    'token_mc_usd': token_mc_usd,  # НОВОЕ ПОЛЕ MC!
                     'is_bio_pair': dao_metrics['is_bio_pair'],
                     'our_position_value_usd': dao_metrics['our_position_value_usd'],
                     'target_lp_value_usd': dao_metrics['target_lp_value_usd'],
@@ -1341,10 +1393,7 @@ async def main():
         if SUPABASE_ENABLED:
             await generator.save_to_supabase(snapshots)
             
-            # Получаем актуальные DAO токены для исторических данных
-            dao_tokens = await generator.load_dao_tokens_for_calculations()
-            
-            # Собираем исторические данные цен токенов
+            # Собираем исторические данные цен токенов (используем уже загруженные dao_tokens)
             async with httpx.AsyncClient() as client:
                 await generator.collect_token_price_history(snapshots, dao_tokens, client)
         

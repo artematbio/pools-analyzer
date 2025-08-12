@@ -470,9 +470,8 @@ class BioLPAnalyzer:
             
             # 4. Position Details - наши текущие позиции
             print("   📍 Получаю актуальные Position snapshots...")
-            positions = self.supabase.client.table('lp_position_snapshots').select('*').gt(
-                'position_value_usd', 0
-            ).order('created_at', desc=True).execute()
+            # ИСПРАВЛЕНО: Берем ВСЕ записи, потом фильтруем только активные после дедупликации
+            positions = self.supabase.client.table('lp_position_snapshots').select('*').order('created_at', desc=True).execute()
             
             if positions.data:
                 # Берем только последний снапшот для каждой позиции
@@ -481,6 +480,11 @@ class BioLPAnalyzer:
                     key = pos['position_mint']
                     if key not in latest_positions:
                         latest_positions[key] = pos
+                
+                # ИСПРАВЛЕНО: Фильтруем активные позиции ПОСЛЕ дедупликации
+                active_positions = {k: v for k, v in latest_positions.items() 
+                                  if float(v.get('position_value_usd', 0)) > 0}
+                latest_positions = active_positions
                 
                 data["position_details"] = list(latest_positions.values())
                 print(f"     ✅ {len(latest_positions)} активных позиций")

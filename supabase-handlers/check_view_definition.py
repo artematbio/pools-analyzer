@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import sys
+sys.path.append('..')
 from database_handler import SupabaseHandler
 
 def check_view_definition():
