@@ -71,6 +71,7 @@ class BotCommandHandler:
             application.add_handler(CommandHandler("help", self.help_command))
             application.add_handler(CommandHandler("status", self.status_command))
             application.add_handler(CommandHandler("run_analysis", self.run_analysis_command))
+            application.add_handler(CommandHandler("report", self.full_report_command))
             application.add_handler(CommandHandler("schedule", self.schedule_command))
             application.add_handler(CommandHandler("test", self.test_command))
             
@@ -84,6 +85,7 @@ class BotCommandHandler:
                     BotCommand("help", "🆘 Show help message"),
                     BotCommand("status", "📊 System status"),
                     BotCommand("run_analysis", "🔄 Manual pool analysis"),
+                    BotCommand("report", "📊 Full multichain report"),
                     BotCommand("schedule", "📅 View scheduled tasks"),
                     BotCommand("test", "🧪 Test bot functionality")
                 ]
@@ -138,6 +140,7 @@ Mention the bot: <code>@botname /command</code>
 • /help - Show help message
 • /status - System status  
 • /run_analysis - Trigger analysis
+• /report - Full multichain report
 • /schedule - View scheduled tasks
 • /test - Test functions
 
@@ -164,6 +167,7 @@ Welcome to your automated Multi-Chain DeFi portfolio monitoring system!
 /help - Show this help message
 /status - System status and health check
 /run_analysis - Manually trigger analysis
+/report - Generate full multichain report
 /schedule - View scheduled tasks
 /test - Test bot functionality
 
@@ -200,6 +204,7 @@ The bot will automatically send analysis reports to this chat."""
 
 <b>📊 Analysis Commands:</b>
 • <code>@botname /run_analysis</code> - Trigger analysis
+• <code>@botname /report</code> - Full multichain report
 • <code>@botname /schedule</code> - View scheduled tasks
 
 <b>🔧 System Commands:</b>
@@ -225,6 +230,7 @@ Bot must be a group admin OR commands must be sent with @botname mention"""
 
 <b>📊 Analysis Commands:</b>
 /run_analysis - Manually trigger pool analysis
+/report - Generate complete multichain report (all networks)
 /schedule - View next scheduled tasks
 
 <b>🔧 System Commands:</b>
@@ -297,6 +303,67 @@ The bot runs on Railway with automatic restarts."""
             error_msg = f"❌ Failed to run analysis: {str(e)}"
             await update.message.reply_text(error_msg)
             logging.error(f"Manual analysis failed: {e}")
+    
+    async def full_report_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /report command - generate full multichain report"""
+        if not self._is_authorized(update.effective_chat.id):
+            await update.message.reply_text("❌ Unauthorized access")
+            return
+        
+        # Send immediate response
+        await update.message.reply_text("📊 Запуск полного мультичейн отчета...\n⏱️ Это может занять 5-10 минут.\n\n🔄 Выполняется:")
+        
+        try:
+            if not self.scheduler:
+                await update.message.reply_text("❌ Scheduler недоступен для полного отчета")
+                return
+            
+            progress_msg = "📊 **ПОЛНЫЙ ОТЧЕТ В ПРОЦЕССЕ**\n\n"
+            
+            # 1. Solana positions
+            progress_msg += "1️⃣ Анализ Solana позиций... ⏳"
+            await update.message.reply_text(progress_msg, parse_mode='Markdown')
+            await self.scheduler.run_pool_analysis()
+            
+            # 2. Ethereum positions  
+            progress_msg += "✅\n2️⃣ Анализ Ethereum позиций... ⏳"
+            await update.message.reply_text(progress_msg, parse_mode='Markdown')
+            await self.scheduler.run_ethereum_positions_analysis()
+            
+            # 3. Base positions
+            progress_msg += "✅\n3️⃣ Анализ Base позиций... ⏳" 
+            await update.message.reply_text(progress_msg, parse_mode='Markdown')
+            await self.scheduler.run_base_positions_analysis()
+            
+            # 4. DAO pools snapshots
+            progress_msg += "✅\n4️⃣ Снапшот DAO пулов... ⏳"
+            await update.message.reply_text(progress_msg, parse_mode='Markdown')
+            await self.scheduler.run_dao_pools_snapshots()
+            
+            # 5. Generate final report
+            progress_msg += "✅\n5️⃣ Генерация финального отчета... ⏳"
+            await update.message.reply_text(progress_msg, parse_mode='Markdown')
+            
+            # Set flag to skip delivery confirmation message
+            self.scheduler._manual_report_mode = True
+            await self.scheduler.run_multichain_telegram_report()
+            self.scheduler._manual_report_mode = False
+            
+            # Final success message
+            success_msg = "✅ **ПОЛНЫЙ МУЛЬТИЧЕЙН ОТЧЕТ ЗАВЕРШЕН**\n\n"
+            success_msg += "🎯 Все сети проанализированы\n"
+            success_msg += "📊 Отчет отправлен в чат\n"
+            success_msg += f"🕐 {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+            
+            await update.message.reply_text(success_msg, parse_mode='Markdown')
+            
+        except Exception as e:
+            error_msg = f"❌ **ОШИБКА ПОЛНОГО ОТЧЕТА**\n\n"
+            error_msg += f"🚨 {str(e)}\n"
+            error_msg += f"🕐 {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
+            
+            await update.message.reply_text(error_msg, parse_mode='Markdown')
+            logging.error(f"Full report failed: {e}")
     
     async def schedule_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /schedule command"""

@@ -87,6 +87,9 @@ class RaydiumScheduler:
         # Enable fast analyzer mode for scheduled tasks
         self._use_fast_analyzer = False
         
+        # Flag to suppress delivery confirmation for manual reports
+        self._manual_report_mode = False
+        
         # System health monitoring
         self.system_health = {
             'status': 'starting',
@@ -789,14 +792,15 @@ asyncio.run(main())
             if "успешно создан и отправлен" in output or "successfully created and sent" in output:
                 logging.info("✅ Multi-chain Telegram report sent successfully")
                 
-                # Send additional status update
-                status_message = (
-                    f"📊 **MULTI-CHAIN REPORT DELIVERED**\n"
-                    f"🕐 {datetime.now().strftime('%H:%M UTC')}\n"
-                    f"🌐 Networks: Solana • Ethereum • Base\n"
-                    f"✅ Report sent to Telegram successfully"
-                )
-                await self.telegram.send_message(status_message)
+                # Send additional status update only for scheduled reports
+                if not getattr(self, '_manual_report_mode', False):
+                    status_message = (
+                        f"📊 **MULTI-CHAIN REPORT DELIVERED**\n"
+                        f"🕐 {datetime.now().strftime('%H:%M UTC')}\n"
+                        f"🌐 Networks: Solana • Ethereum • Base\n"
+                        f"✅ Report sent to Telegram successfully"
+                    )
+                    await self.telegram.send_message(status_message)
                 
             else:
                 # Check if there were partial errors but still some success
