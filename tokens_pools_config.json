@@ -207,6 +207,13 @@
         "address": "EzYEwn4R5tNkNGw4K2a5a58MJFQESdf1r4UJrV7cpUF3",
         "decimals": 6,
         "coingecko_id": "mycelium-dao"
+      },
+      {
+        "symbol": "VITA",
+        "name": "VitaDAO",
+        "address": "vita3LfgKErA37DWA7W8RBks3c7Rym2hPFgizNRshBi",
+        "decimals": 9,
+        "coingecko_id": "vitadao"
       }
     ]
   },
@@ -608,6 +615,14 @@
         "fee_tier": 2500,
         "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
         "token1": "spinezMPKxkBpf4Q9xET2587fehM3LuKe4xoAoXtSjR"
+      },
+      {
+        "name": "BIO/VITA",
+        "address": "J6jUwNvCUme9ma7DMsHiWVXic4B6zovVdr2GfCrozauB",
+        "protocol": "raydium_standard_amm",
+        "fee_tier": 2500,
+        "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "token1": "vita3LfgKErA37DWA7W8RBks3c7Rym2hPFgizNRshBi"
       }
     ]
   }
