@@ -10,7 +10,7 @@ import logging
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 
-from coinmarketcap_client import CoinMarketCapClient
+# from coinmarketcap_client import CoinMarketCapClient  # Отключено
 
 logger = logging.getLogger(__name__)
 
@@ -20,22 +20,22 @@ class TokenDataAggregator:
         # self.cmc_client = CoinMarketCapClient()
         self.coingecko_api_key = os.getenv('COINGECKO_API_KEY', 'CG-2zrbNPwAg5rJeE4zrfCRJk6j')
         
-        # Актуальные CoinGecko ID для наших токенов (из tokens_pools_config.json)
+        # ✅ ИСПРАВЛЕННЫЕ CoinGecko ID для наших токенов (из tokens_pools_config.json)
         self.token_coingecko_ids = {
             'BIO': 'bio-protocol',
             'VITA': 'vitadao',
             'HAIR': 'hairdao', 
             'NEURON': 'cerebrum-dao',
-            'ATH': 'athenadao-token',  # ИСПРАВЛЕНО
+            'ATH': 'athenadao-token',
             'GROW': 'valleydao',
             'CRYO': 'cryodao',
-            'PSY': 'psychedelics-anonymous',
-            'QBIO': 'qbio-dao',
-            'SPINE': 'spinefi',
-            'CURES': 'cures-token',
-            'RIF': 'rif-token',
-            'URO': 'uro-token',
-            'MYCO': 'mycelium'
+            'PSY': 'psydao',  # ✅ ИСПРАВЛЕНО: psydao вместо psychedelics-anonymous
+            'QBIO': 'quantum-biology-dao',  # ✅ ИСПРАВЛЕНО: quantum-biology-dao вместо qbio-dao
+            'SPINE': 'spinedao-token',  # ✅ ИСПРАВЛЕНО: spinedao-token вместо spinefi
+            'CURES': 'curetopia',  # ✅ ИСПРАВЛЕНО: curetopia вместо cures-token
+            'RIF': 'rifampicin',  # ✅ ИСПРАВЛЕНО: rifampicin вместо rif-token
+            'URO': 'urolithin-a',  # ✅ ИСПРАВЛЕНО: urolithin-a вместо uro-token
+            'MYCO': 'mycelium'  # Единственный который работал!
         }
 
     async def get_comprehensive_token_data(self, token_symbols: List[str]) -> Dict[str, Dict[str, Any]]:
