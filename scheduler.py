@@ -210,8 +210,13 @@ class RaydiumScheduler:
         
         self.running = True
         
-        # Disable bot commands handler to prevent Telegram API conflicts in Railway
-        bot_app = None  # await self.bot_handler.setup_bot_commands()
+        # Setup bot commands handler (enabled for local environment, disabled for Railway)
+        if not self.railway_env:
+            logging.info("🤖 Local environment detected - enabling Telegram bot commands")
+            bot_app = await self.bot_handler.setup_bot_commands()
+        else:
+            logging.info("🚂 Railway environment detected - disabling bot polling to prevent conflicts")
+            bot_app = None
         
         # Send startup notification
         await alerting_system.send_startup_notification()
@@ -306,20 +311,44 @@ class RaydiumScheduler:
                 await asyncio.sleep(60)  # Wait longer on error
     
     async def _run_bot_handler(self, bot_app):
-        """Run the Telegram bot handler (send-only mode for Railway)"""
-        # Note: Disabled polling to prevent conflicts in Railway deployment
-        # Only send-only functionality is used via telegram_sender.py
-        logging.info("🤖 Telegram bot handler initialized (send-only mode)")
+        """Run the Telegram bot handler"""
+        if bot_app is None:
+            logging.info("🤖 Telegram bot handler initialized (send-only mode)")
+            try:
+                # Keep the handler alive but without polling
+                while self.running:
+                    await asyncio.sleep(10)  # Check every 10 seconds
+            except Exception as e:
+                logging.error(f"Bot handler error: {e}")
+            logging.info("🤖 Telegram bot handler stopped")
+            return
         
+        logging.info("🤖 Starting Telegram bot with polling...")
         try:
-            # Keep the handler alive but without polling
+            # Initialize and start polling
+            await bot_app.initialize()
+            await bot_app.start()
+            
+            # Start polling for commands
+            logging.info("🤖 Bot polling started - commands are now active!")
+            await bot_app.updater.start_polling(drop_pending_updates=True)
+            
+            # Keep running
             while self.running:
-                await asyncio.sleep(10)  # Check every 10 seconds
+                await asyncio.sleep(1)
                 
         except Exception as e:
             logging.error(f"Bot handler error: {e}")
-            
-        logging.info("🤖 Telegram bot handler stopped")
+            await alerting_system.send_error_alert("Telegram Bot", str(e))
+        finally:
+            if bot_app:
+                try:
+                    await bot_app.updater.stop()
+                    await bot_app.stop()
+                    await bot_app.shutdown()
+                    logging.info("🤖 Telegram bot stopped")
+                except:
+                    pass
     
     def _should_run_task(self, task: ScheduledTask, current_time: datetime) -> bool:
         """Check if task should run based on cron expression"""
