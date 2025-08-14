@@ -161,12 +161,15 @@ class MultiChainReportGenerator:
                 'network', 'solana'
             ).gte('created_at', '2025-07-28').order('created_at', desc=True).execute()
             
-            # Получаем ТОЛЬКО ПОСЛЕДНИЕ позиции Solana (избегаем дублирование)
+            # Получаем ТОЛЬКО СВЕЖИЕ позиции Solana (последние 2 дня)
+            from datetime import datetime, timedelta
+            two_days_ago = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+            
             positions_result = supabase_handler.client.table('lp_position_snapshots').select('*').not_.like(
                 'position_mint', 'ethereum_%'
             ).not_.like(
                 'position_mint', 'base_%'
-            ).gte('created_at', '2025-07-28').order('created_at', desc=True).execute()
+            ).gte('created_at', two_days_ago).order('created_at', desc=True).execute()
             
             # Убираем дублирование - берем только последнюю запись для каждой position_mint
             unique_positions = {}
@@ -187,14 +190,34 @@ class MultiChainReportGenerator:
             total_value = 0
             total_yield = 0
             
-            # Фильтруем уникальные позиции по минимальной стоимости и адаптируем поля
+            # Фильтруем уникальные позиции по минимальной стоимости И активности и адаптируем поля
             filtered_unique_positions = []
             for pos in unique_positions.values():
-                if pos['position_value_usd'] >= min_value_usd:
-                    # Адаптируем поля позиции для совместимости с форматтером
-                    pos['position_value'] = pos['position_value_usd']  # Дублируем для совместимости
-                    pos['pool_address'] = pos['pool_id']  # Для Solana pool_id = pool_address
-                    filtered_unique_positions.append(pos)
+                # Проверяем что позиция активна (стоимость > минимальной И > 0)
+                position_value = pos.get('position_value_usd', 0)
+                if position_value >= min_value_usd and position_value > 0:
+                    # Дополнительная проверка свежести данных (не старше 7 дней)
+                    try:
+                        from datetime import datetime, timezone
+                        created_at = datetime.fromisoformat(pos['created_at'].replace('Z', '+00:00'))
+                        days_old = (datetime.now(timezone.utc) - created_at).days
+                        
+                        if days_old <= 2:  # Только очень свежие данные (не старше 2 дней)
+                            # Адаптируем поля позиции для совместимости с форматтером
+                            pos['position_value'] = pos['position_value_usd']  # Дублируем для совместимости
+                            pos['pool_address'] = pos['pool_id']  # Для Solana pool_id = pool_address
+                            filtered_unique_positions.append(pos)
+                            print(f"   ✅ Позиция включена: {pos.get('position_mint', 'N/A')[-8:]}... (${position_value:,.2f}, {days_old} дней)")
+                        else:
+                            print(f"   ❌ Позиция исключена (устарела): {pos.get('position_mint', 'N/A')[-8:]}... (${position_value:,.2f}, {days_old} дней)")
+                    except Exception as e:
+                        print(f"   ⚠️ Ошибка проверки даты позиции {pos.get('position_mint', 'N/A')[-8:]}...: {e}")
+                        # В случае ошибки парсинга даты, включаем позицию если она соответствует другим критериям
+                        pos['position_value'] = pos['position_value_usd']
+                        pos['pool_address'] = pos['pool_id']
+                        filtered_unique_positions.append(pos)
+                else:
+                    print(f"   ❌ Позиция исключена (низкая стоимость): {pos.get('position_mint', 'N/A')[-8:]}... (${position_value:,.2f})")
             
             # Группируем ОТФИЛЬТРОВАННЫЕ уникальные позиции по пулам
             positions_by_pool = {}
@@ -249,7 +272,7 @@ class MultiChainReportGenerator:
                 'network': 'solana'
             }
             
-            print(f"✅ Загружено из Supabase: {len(pools_data)} пулов, {len(filtered_unique_positions)} уникальных позиций")
+            print(f"✅ Загружено из Supabase: {len(pools_data)} пулов, {len(filtered_unique_positions)} свежих позиций (фильтр: последние 2 дня + стоимость ≥ ${min_value_usd})")
             return solana_data
                 
         except Exception as e:
@@ -298,10 +321,13 @@ class MultiChainReportGenerator:
             
             print("🗄️ Получаем данные Ethereum из Supabase...")
             
-            # ✅ ИСПРАВЛЕНО: Получаем ВСЕ позиции, потом фильтруем активные после дедупликации
+            # Получаем СВЕЖИЕ позиции Ethereum (последние 2 дня)
+            from datetime import datetime, timedelta
+            two_days_ago = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+            
             positions_result = supabase_handler.client.table('lp_position_snapshots').select('*').eq(
                 'network', 'ethereum'
-            ).order('created_at', desc=True).execute()
+            ).gte('created_at', two_days_ago).order('created_at', desc=True).execute()
             
             # Убираем дублирование - берем только последнюю запись для каждой position_mint
             unique_positions = {}
@@ -404,10 +430,13 @@ class MultiChainReportGenerator:
             
             print("🗄️ Получаем данные Base из Supabase...")
             
-            # ✅ ИСПРАВЛЕНО: Получаем ВСЕ позиции, потом фильтруем активные после дедупликации
+            # Получаем СВЕЖИЕ позиции Base (последние 2 дня)
+            from datetime import datetime, timedelta
+            two_days_ago = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+            
             positions_result = supabase_handler.client.table('lp_position_snapshots').select('*').eq(
                 'network', 'base'
-            ).order('created_at', desc=True).execute()
+            ).gte('created_at', two_days_ago).order('created_at', desc=True).execute()
             
             # Убираем дублирование - берем только последнюю запись для каждой position_mint
             unique_positions = {}
