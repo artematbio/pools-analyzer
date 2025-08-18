@@ -323,8 +323,7 @@ class DAOPoolsSnapshotGenerator:
 
     async def _fetch_missing_fdv_from_api(self, dao_tokens: Dict[str, Dict[str, Any]]):
         """
-        ОБНОВЛЕННАЯ ЛОГИКА: Получаем FDV через основной CoinGecko API (с max_supply)
-        Fallback: GeckoTerminal API для цен
+        ИСПРАВЛЕННАЯ ЛОГИКА: Получаем FDV и ОБЯЗАТЕЛЬНО сохраняем в dao_tokens
         """
         print("🔍 Получаем актуальные FDV через основной CoinGecko API (price × max_supply)...")
         
@@ -360,16 +359,21 @@ class DAOPoolsSnapshotGenerator:
         
         # 2. FALLBACK: GeckoTerminal API только для токенов БЕЗ данных
         tokens_needing_data = [symbol for symbol, data in dao_tokens.items() 
-                              if data.get('fdv_usd', 0) == 0 or data.get('market_cap_usd', 0) == 0]
+                              if data.get('fdv_usd', 0) == 0]
         
         if tokens_needing_data:
             print(f"🔄 Fallback: GeckoTerminal API для {len(tokens_needing_data)} недостающих токенов...")
+            
             async with httpx.AsyncClient() as client:
                 for token_symbol in tokens_needing_data:
+                    print(f"   🔍 Обрабатываем токен: {token_symbol}")
+                    
                     token_info = dao_tokens[token_symbol]
-                    # Обновляем FDV только для токенов БЕЗ данных
+                    
+                    # 🔧 ИСПРАВЛЕНО: Инициализируем переменные для каждого токена
                     best_fdv = 0
                     best_price = 0
+                    best_mc = 0
                     best_network = None
                 
                     # Проверяем все сети и выбираем максимальный FDV
@@ -391,56 +395,70 @@ class DAOPoolsSnapshotGenerator:
                                 # Получаем цену и supply данные
                                 price_usd = attrs.get('price_usd')
                                 max_supply = attrs.get('max_supply')  
-                                total_supply = attrs.get('normalized_total_supply')  # Используем нормализованное значение
+                                total_supply = attrs.get('normalized_total_supply')
+                                market_cap = attrs.get('market_cap_usd', 0)
                                 
-                                # Рассчитываем FDV по формуле вместо использования готового fdv_usd
+                                # Рассчитываем FDV
                                 calculated_fdv = 0
-                                if price_usd:
+                                supply_source = "none"
+                                
+                                if price_usd and float(price_usd) > 0:
                                     price = float(price_usd)
                                 
-                                # FDV = price × max_supply, если max_supply есть
-                                if max_supply and max_supply != "0":
-                                    supply_for_fdv = float(max_supply)
-                                    calculated_fdv = price * supply_for_fdv
-                                    supply_source = "max_supply"
-                                # Иначе FDV = price × total_supply
-                                elif total_supply:
-                                    supply_for_fdv = float(total_supply)
-                                    calculated_fdv = price * supply_for_fdv
-                                    supply_source = "total_supply"
-                                else:
-                                    # Fallback: пробуем raw total_supply
-                                    raw_total_supply = attrs.get('total_supply')
-                                    decimals = attrs.get('decimals', 18)
-                                    if raw_total_supply:
-                                        supply_for_fdv = float(raw_total_supply) / (10 ** decimals)
+                                    # FDV = price × max_supply, если max_supply есть
+                                    if max_supply and max_supply != "0" and float(max_supply) > 0:
+                                        supply_for_fdv = float(max_supply)
                                         calculated_fdv = price * supply_for_fdv
-                                        supply_source = "raw_total_supply"
-                            
-                            if calculated_fdv > best_fdv:
-                                best_fdv = calculated_fdv
-                                best_network = network
-                                if price_usd:
-                                    best_price = float(price_usd)
+                                        supply_source = "max_supply"
+                                    # Иначе FDV = price × total_supply
+                                    elif total_supply and float(total_supply) > 0:
+                                        supply_for_fdv = float(total_supply)
+                                        calculated_fdv = price * supply_for_fdv
+                                        supply_source = "total_supply"
+                                    else:
+                                        # Fallback: пробуем raw total_supply
+                                        raw_total_supply = attrs.get('total_supply')
+                                        decimals = attrs.get('decimals', 18)
+                                        if raw_total_supply and float(raw_total_supply) > 0:
+                                            supply_for_fdv = float(raw_total_supply) / (10 ** decimals)
+                                            calculated_fdv = price * supply_for_fdv
+                                            supply_source = "raw_total_supply"
                                 
-                                # Краткая диагностика
-                                print(f"   ✅ {token_symbol} ({network}): FDV ${calculated_fdv:,.0f} (source: {supply_source})")
+                                print(f"      ✅ {network}: FDV ${calculated_fdv:,.0f} (source: {supply_source})")
+                            
+                                # Выбираем лучший результат
+                                if calculated_fdv > best_fdv:
+                                    best_fdv = calculated_fdv
+                                    best_network = network
+                                    best_price = float(price_usd) if price_usd else 0
+                                    best_mc = float(market_cap) if market_cap else 0
                             
                             # Задержка между запросами
                             await asyncio.sleep(0.3)
                             
                         except Exception as e:
                             print(f"   ⚠️ {token_symbol} ({network}): {e}")
-                
-                # Сохраняем лучшие данные
-                if best_fdv > 0:
-                    token_info['fdv_usd'] = best_fdv
-                    print(f"   ✅ {token_symbol}: FDV ${best_fdv:,.0f} (из {best_network})")
                     
-                    if best_price > 0 and token_info.get('price_usd', 0) <= 0:
-                        token_info['price_usd'] = best_price
-                else:
-                    print(f"   ⚠️ {token_symbol}: не удалось получить FDV")
+                    # 🔧 КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: ОБЯЗАТЕЛЬНО сохраняем данные
+                    if best_fdv > 0:
+                        # ПРИНУДИТЕЛЬНО сохраняем в dao_tokens
+                        dao_tokens[token_symbol]['fdv_usd'] = best_fdv
+                        dao_tokens[token_symbol]['data_source'] = 'geckoterminal_api'
+                        
+                        if best_price > 0:
+                            dao_tokens[token_symbol]['price_usd'] = best_price
+                        
+                        if best_mc > 0:
+                            dao_tokens[token_symbol]['market_cap_usd'] = best_mc
+                        
+                        print(f"   ✅ {token_symbol}: СОХРАНЕНО FDV ${best_fdv:,.0f} (из {best_network})")
+                        
+                        # 🔧 ПРОВЕРЯЕМ что данные действительно сохранились
+                        saved_fdv = dao_tokens[token_symbol].get('fdv_usd', 0)
+                        print(f"   🔍 {token_symbol}: проверка сохранения - FDV в dao_tokens: ${saved_fdv:,.0f}")
+                        
+                    else:
+                        print(f"   ❌ {token_symbol}: не удалось получить валидный FDV")
     
     async def load_our_positions_from_supabase(self) -> Dict[str, Dict[str, Any]]:
         """Загрузить наши позиции из Supabase lp_position_snapshots"""
