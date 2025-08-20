@@ -143,6 +143,12 @@ class MultiChainReportGenerator:
         # === SUMMARY CALCULATION ===
         self._calculate_summary(multichain_data)
         
+        # Безопасность: если по какой-то сети пусто, явно логируем для отладки
+        if not multichain_data.get('ethereum'):
+            print("⚠️ В отчете нет Ethereum позиций (после Supabase и RPC)")
+        if not multichain_data.get('base'):
+            print("⚠️ В отчете нет Base позиций (после Supabase и RPC)")
+        
         return multichain_data
     
     async def _get_solana_data(self, min_value_usd: float) -> Optional[Dict]:
@@ -341,6 +347,11 @@ class MultiChainReportGenerator:
                               if pos.get('position_value_usd', 0) >= min_value_usd]
             positions_result.data = active_positions
             
+            # Если в Supabase нет актуальных позиций, делаем фолбэк на RPC
+            if not positions_result.data:
+                print("⚠️ Нет свежих Ethereum позиций в Supabase → фолбэк на RPC")
+                return await self._get_ethereum_data_via_rpc(min_value_usd)
+            
             # Получаем данные пулов для контекста
             pools_result = supabase_handler.client.table('lp_pool_snapshots').select('*').eq(
                 'network', 'ethereum'
@@ -449,6 +460,11 @@ class MultiChainReportGenerator:
             active_positions = [pos for pos in unique_positions.values() 
                               if pos.get('position_value_usd', 0) >= min_value_usd]
             positions_result.data = active_positions
+            
+            # Если в Supabase нет актуальных позиций, делаем фолбэк на RPC
+            if not positions_result.data:
+                print("⚠️ Нет свежих Base позиций в Supabase → фолбэк на RPC")
+                return await self._get_base_data_via_rpc(min_value_usd)
             
             # Получаем данные пулов для контекста
             pools_result = supabase_handler.client.table('lp_pool_snapshots').select('*').eq(
