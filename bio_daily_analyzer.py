@@ -482,8 +482,20 @@ class BioLPAnalyzer:
                         latest_positions[key] = pos
                 
                 # ИСПРАВЛЕНО: Фильтруем активные позиции ПОСЛЕ дедупликации
-                active_positions = {k: v for k, v in latest_positions.items() 
-                                  if float(v.get('position_value_usd', 0)) > 0}
+                # Исключаем позиции с нулевой ликвидностью (закрытые)
+                active_positions = {}
+                for k, v in latest_positions.items():
+                    try:
+                        position_value = float(v.get('position_value_usd', 0) or 0)
+                    except Exception:
+                        position_value = 0.0
+                    liquidity_raw = v.get('liquidity', '0')
+                    try:
+                        liquidity_value = float(str(liquidity_raw))
+                    except Exception:
+                        liquidity_value = 0.0
+                    if position_value > 0 and liquidity_value > 0:
+                        active_positions[k] = v
                 latest_positions = active_positions
                 
                 data["position_details"] = list(latest_positions.values())
