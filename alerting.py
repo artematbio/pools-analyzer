@@ -427,10 +427,12 @@ class AlertingSystem:
                 logging.warning("Supabase не подключен для proximity checks")
                 return False
             
-            # Получаем все позиции из Supabase (с минимальной стоимостью $100)
+            # Получаем все СВЕЖИЕ позиции из Supabase (с минимальной стоимостью $100)
+            from datetime import datetime, timedelta
+            two_days_ago = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
             positions_result = supabase_handler.client.table('lp_position_snapshots').select(
-                'position_mint, pool_name, pool_id, network, position_value_usd, tick_lower, tick_upper, created_at, liquidity'
-            ).gte('position_value_usd', 100).order('created_at', desc=True).execute()
+                'position_mint, pool_name, pool_id, network, position_value_usd, tick_lower, tick_upper, created_at, liquidity, token0_amount, token1_amount'
+            ).gte('position_value_usd', 100).gte('created_at', two_days_ago).order('created_at', desc=True).execute()
             
             if not positions_result.data:
                 logging.info("Нет позиций для proximity проверки")
@@ -452,7 +454,21 @@ class AlertingSystem:
                     liquidity_value = float(str(liquidity_raw))
                 except Exception:
                     liquidity_value = 0.0
-                if liquidity_value > 0:
+                # Дополнительно проверяем нулевые amounts, если доступны (для EVM позиций)
+                token0_amount = pos.get('token0_amount')
+                token1_amount = pos.get('token1_amount')
+                try:
+                    token0_amount_val = float(token0_amount) if token0_amount is not None else None
+                    token1_amount_val = float(token1_amount) if token1_amount is not None else None
+                except Exception:
+                    token0_amount_val = token0_amount_val if 'token0_amount_val' in locals() else None
+                    token1_amount_val = token1_amount_val if 'token1_amount_val' in locals() else None
+
+                has_nonzero_amounts = True
+                if token0_amount_val is not None and token1_amount_val is not None:
+                    has_nonzero_amounts = (token0_amount_val > 0) or (token1_amount_val > 0)
+
+                if liquidity_value > 0 and has_nonzero_amounts:
                     filtered_unique_positions[mint] = pos
             unique_positions = filtered_unique_positions
 
