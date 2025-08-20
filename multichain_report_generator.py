@@ -178,8 +178,17 @@ class MultiChainReportGenerator:
                 if pos_mint not in unique_positions:
                     unique_positions[pos_mint] = pos
             
-            # Преобразуем обратно в список только уникальных позиций  
-            positions_result.data = list(unique_positions.values())
+            # Фильтруем нулевую ликвидность и преобразуем обратно в список
+            filtered_unique_positions_map = {}
+            for k, pos in unique_positions.items():
+                liquidity_raw = pos.get('liquidity', '0')
+                try:
+                    liquidity_value = float(str(liquidity_raw))
+                except Exception:
+                    liquidity_value = 0.0
+                if liquidity_value > 0:
+                    filtered_unique_positions_map[k] = pos
+            positions_result.data = list(filtered_unique_positions_map.values())
             
             if not pools_result.data:
                 print("⚠️ Нет свежих данных Solana в Supabase")
@@ -192,7 +201,7 @@ class MultiChainReportGenerator:
             
             # Фильтруем уникальные позиции по минимальной стоимости И активности и адаптируем поля
             filtered_unique_positions = []
-            for pos in unique_positions.values():
+            for pos in positions_result.data:
                 # Проверяем что позиция активна (стоимость > минимальной И > 0)
                 position_value = pos.get('position_value_usd', 0)
                 if position_value >= min_value_usd and position_value > 0:
@@ -337,8 +346,15 @@ class MultiChainReportGenerator:
                     unique_positions[pos_mint] = pos
             
             # Фильтруем активные позиции ПОСЛЕ дедупликации
-            active_positions = [pos for pos in unique_positions.values() 
-                              if pos.get('position_value_usd', 0) >= min_value_usd]
+            active_positions = []
+            for pos in unique_positions.values():
+                liquidity_raw = pos.get('liquidity', '0')
+                try:
+                    liquidity_value = float(str(liquidity_raw))
+                except Exception:
+                    liquidity_value = 0.0
+                if liquidity_value > 0 and pos.get('position_value_usd', 0) >= min_value_usd:
+                    active_positions.append(pos)
             positions_result.data = active_positions
             
             # Получаем данные пулов для контекста
@@ -446,8 +462,15 @@ class MultiChainReportGenerator:
                     unique_positions[pos_mint] = pos
             
             # Фильтруем активные позиции ПОСЛЕ дедупликации
-            active_positions = [pos for pos in unique_positions.values() 
-                              if pos.get('position_value_usd', 0) >= min_value_usd]
+            active_positions = []
+            for pos in unique_positions.values():
+                liquidity_raw = pos.get('liquidity', '0')
+                try:
+                    liquidity_value = float(str(liquidity_raw))
+                except Exception:
+                    liquidity_value = 0.0
+                if liquidity_value > 0 and pos.get('position_value_usd', 0) >= min_value_usd:
+                    active_positions.append(pos)
             positions_result.data = active_positions
             
             # Получаем данные пулов для контекста

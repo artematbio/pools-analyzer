@@ -429,7 +429,7 @@ class AlertingSystem:
             
             # Получаем все позиции из Supabase (с минимальной стоимостью $100)
             positions_result = supabase_handler.client.table('lp_position_snapshots').select(
-                'position_mint, pool_name, pool_id, network, position_value_usd, tick_lower, tick_upper, created_at'
+                'position_mint, pool_name, pool_id, network, position_value_usd, tick_lower, tick_upper, created_at, liquidity'
             ).gte('position_value_usd', 100).order('created_at', desc=True).execute()
             
             if not positions_result.data:
@@ -438,13 +438,28 @@ class AlertingSystem:
             
             # Убираем дублирование - берем только последнюю запись для каждой position_mint
             unique_positions = {}
-            pool_ids_needed = set()
             
             for pos in positions_result.data:
                 pos_mint = pos['position_mint']
                 if pos_mint not in unique_positions:
                     unique_positions[pos_mint] = pos
-                    pool_ids_needed.add((pos['pool_id'], pos['network']))
+
+            # Фильтруем позиции без ликвидности (закрытые/обнуленные)
+            filtered_unique_positions = {}
+            for mint, pos in unique_positions.items():
+                liquidity_raw = pos.get('liquidity', '0')
+                try:
+                    liquidity_value = float(str(liquidity_raw))
+                except Exception:
+                    liquidity_value = 0.0
+                if liquidity_value > 0:
+                    filtered_unique_positions[mint] = pos
+            unique_positions = filtered_unique_positions
+
+            # Пересобираем список пулов, для которых нужны current_tick
+            pool_ids_needed = set()
+            for pos in unique_positions.values():
+                pool_ids_needed.add((pos['pool_id'], pos['network']))
             
             # 🔧 ИСПРАВЛЕНИЕ: Получаем текущие тики пулов (гибридный подход)
             pool_ticks = {}
