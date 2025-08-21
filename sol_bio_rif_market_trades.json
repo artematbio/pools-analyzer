@@ -1,0 +1,3 @@
+{
+  "query": "{\n  Solana {\n    DEXTradeByTokens(\n      limit: {count: 50}\n      orderBy: {descending: Block_Time}\n      where: {\n        Trade: {\n          Market: { MarketAddress: { is: \"HMWSMe7PVmwmiRccbTW14BkKj54x3XESgBgqAshTutaA\" } }\n        }\n      }\n    ) {\n      Block { Time Slot }\n      Transaction { Signature }\n      Trade {\n        AmountInUSD\n        PriceInUSD\n        Currency { Symbol MintAddress }\n        Side { Currency { Symbol MintAddress } }\n        Market { MarketAddress }\n        Dex { ProtocolName ProtocolFamily }\n      }\n    }\n  }\n}\n"
+}

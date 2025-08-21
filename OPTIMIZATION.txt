@@ -1,0 +1,212 @@
+POOLS-ANALYZER — FULL ENHANCEMENT PLAN (BITQUERY INTEGRATION AND ANALYTICS EXPANSION)
+
+1) Objectives and KPIs
+- Objectives:
+  - Reliable, reproducible market telemetry per pool and token (prices, volumes, trades, buy/sell, net flows).
+  - Complete picture of our LP positions and DAO metrics (no gaps, no duplication).
+  - Real-time alerts for large trades and anomalies.
+  - Actionable Telegram reporting focused on LP decisions.
+- KPIs (minimum):
+  - < 1% daily volume deviation vs independent source on sampled pools.
+  - 100% coverage of real BIO pairs in the VIEW and reports; 0 missing.
+  - Detection of trades > $X (configurable) within ≤ 1 minute.
+  - Daily refresh of price/FDV/MC for all DAO tokens.
+
+2) Supabase schema extensions
+- Table `lp_pool_snapshots`: add fields
+  - `trades_24h` INTEGER, `buy_24h_usd` DECIMAL, `sell_24h_usd` DECIMAL, `net_flow_24h_usd` DECIMAL,
+    `price_source` TEXT, `volume_source` TEXT, `market_address` TEXT (Solana), `dex_protocol` TEXT
+  - Indexes: `(pool_address, network, created_at DESC)`, `(market_address, created_at DESC)`
+- Table `token_price_history`: ensure fields
+  - `price_current`, `fdv_current`, `price_change_24h_percent`, `price_change_7d_percent`,
+    `fdv_change_24h_percent`, `fdv_change_7d_percent`, `source`
+- Table `lp_pool_activities` (alerts/events)
+  - `id`, `timestamp`, `network`, `pool_address`, `market_address`, `event_type`, `amount_usd`, `tx_hash`, `details` JSON
+- Materialized VIEW or staging table `bio_dao_lp_support_m`
+  - Refresh after `dao_pools_snapshot` finishes; contains last position snapshots, pool aggregates, and stable joins by `pool_name+network` and addresses.
+
+3) Bitquery integration
+- Endpoints and principles
+  - V1: `https://graphql.bitquery.io` (usually `X-API-KEY`)
+  - EAP/Streaming: `https://streaming.bitquery.io/eap` (`Authorization: Bearer <API_KEY>`)
+  - Use ISO8601 DateTime for time filters. See Query Principles: https://docs.bitquery.io/docs/graphql/query/
+- Solana (EAP)
+  - Market discovery: `Solana { DEXTradeByTokens }` filtered by token mint → read `Trade.Market.MarketAddress`, `Dex.ProtocolName`.
+  - Per-pool aggregation: `where: { Trade: { Market: { MarketAddress: { is: "..." } } } }`, `orderBy: { descending: Block_Time }`.
+  - Metrics: `trades_24h`, `volume_24h_usd`, `avg_price_24h`, `buy_24h_usd`, `sell_24h_usd`, `net_flow_24h_usd`.
+  - Distinguish Raydium v3 (`amm_v3`) vs v2 (`raydium_amm`); Jupiter has empty `MarketAddress`.
+- EVM (V1/V2/EAP)
+  - `dexTrades` by Uniswap V3 pool address to compute 24h volumes/trades and buy/sell direction.
+- Cache/limits
+  - Cache 24h aggregates for 5–15 minutes, apply backoff and request batching.
+
+4) `dao_pools_snapshot.py` enrichment
+- Sources
+  - Token price and 24h volume: Bitquery (preferred, by best market), CoinGecko as fallback.
+  - TVL: keep current source; when available, verify through Bitquery aggregates.
+- Calculations
+  - `our_position_value_usd`: from `lp_position_snapshots` (last snapshots only).
+  - `target_lp_value_usd` = 1% of FDV (FDV = price × max_supply; fallback to total_supply).
+  - `lp_gap_usd`, `is_bio_pair` remain, weighted by market activity when needed.
+- Output
+  - Persist `trades_24h/volume_24h_usd/buy/sell/net_flow` into `lp_pool_snapshots`.
+  - `bio_price_usd`: choose best market (by TVL/volume) across chains.
+
+5) VIEW `bio_dao_lp_support` quality
+- Logic
+  - Join by `pool_name+network` and addresses; include only last position snapshot per `position_mint`.
+  - Integrate 24h aggregates from `lp_pool_snapshots` (trades/volume/buy/sell/net_flow).
+- Materialization
+  - Create `bio_dao_lp_support_m` with scheduled REFRESH after `dao_pools_snapshot`.
+- QA
+  - Validator: sum of our positions per pool vs VIEW; presence of all BIO pairs; 24h volume sanity vs Bitquery.
+
+6) Real-time alerts
+- Subscriptions (EAP Streaming)
+  - Large buys/sells > $X for BIO and DAO pairs; inactivity > N hours; volatility/volume spikes.
+- Dedup and anti-spam
+  - Thresholds + windows; group multiple events; throttle repeats.
+- Persistence
+  - Save to `lp_pool_activities`; push to Telegram (English only).
+
+7) Position data expansion
+- Solana
+  - Save `market_address` per position/pool to link with Bitquery quickly.
+- EVM
+  - Ensure `pool_address` and fee-tier; map to Bitquery `dexTrades` pool id.
+- Extra context
+  - Add pool current price and `trades_24h` to position snapshots for in-range effectiveness context.
+
+8) Historical series and factors
+- `token_price_history`
+  - Collect daily/hourly OHLCV from best market (Bitquery); compute 24h/7d changes.
+- Factor model for LP prioritization
+  - Momentum (1d/7d), market activity (trades_24h, volume_24h), liquidity trend (TVL 7d), net_flow.
+
+9) Reporting (Telegram)
+- Add Market Activity block
+  - For BIO pairs and key DAO pairs: `volume_24h`, `trades_24h`, `buy/sell`, large trades (latest and per 24h).
+- Flexible parameters
+  - Min trade size, tokens/networks filter, activity filter.
+
+10) Tests and QA
+- Reference set of pools/tokens (BIO/RIF, BIO/WSOL, RIF/WSOL, ETH/BIO, etc.) with N days of snapshots.
+- Unit tests for Bitquery adapter (time filters, field mapping, buy/sell logic, Jupiter market handling).
+- Integration tests: compare 24h metrics vs independent source.
+
+11) Risks and mitigation
+- Rate limits/cost: batching, caching, exponential backoff, 24h windows updated every 5–15 minutes.
+- Schema differences (V1/EAP): single adapter with contract tests.
+- Empty/anomalous data: fallbacks, price/volume sanity filters, data-quality flags, market-pause alerts.
+
+12) Roadmap (no production logic changes until approved)
+- Stage 1 (R&D):
+  - Bitquery aggregates prototype (24h volume/trades/buy/sell/net_flow) on key pools; comparison report.
+- Stage 2 (Integration):
+  - Schema extension, writing aggregates to `lp_pool_snapshots`; updated Telegram report.
+- Stage 3 (VIEW and data quality):
+  - Materialize `bio_dao_lp_support_m`, add consistency validator, fixes.
+- Stage 4 (Streaming):
+  - Real-time alerts, event persistence, fine-tuning.
+- Stage 5 (Factors and scoring):
+  - Historical series, factor model for LP prioritization.
+
+13) Combined principles (from ARCHITECTURE) and external docs
+
+- Core principles (short):
+  - Orchestration v2 (token-first): first TOKENS (price, MC, FDV, OHLCV), then positions, then pools, then reports.
+  - Solana collection: Helius RPC (NFT positions) + Raydium json_uri (USD values) + prices (GeckoTerminal/Bitquery). Store to `lp_position_snapshots`.
+  - EVM collection: Alchemy RPC + Uniswap V3 contracts. Store to `lp_position_snapshots` and `lp_pool_snapshots`.
+  - DAO metrics: `dao_pools_snapshot.py` reads our positions, fetches token price/FDV, computes `our_position_value_usd`, `target_lp_value_usd` (1% FDV), `lp_gap_usd`, creates virtual BIO pairs when absent.
+  - VIEW `bio_dao_lp_support`: joins DAO metrics and positions, depends on last snapshots; recommend materialization and refresh after pool snapshots.
+  - Reporting: aggregates across three tables, freshness/active filters, sends structured Telegram report.
+
+- External docs:
+  - Bitquery
+    - Query Principles: https://docs.bitquery.io/docs/graphql/query/
+    - Solana Examples: https://docs.bitquery.io/docs/examples/Solana/
+    - Ethereum Examples: https://docs.bitquery.io/docs/examples/Ethereum/
+    - IDE: https://ide.bitquery.io/
+    - Streaming / EAP: https://docs.bitquery.io/docs/streaming/
+  - Supabase
+    - Supabase Docs: https://supabase.com/docs
+    - Supabase Python: https://supabase.com/docs/reference/python/introduction
+  - PostgreSQL: https://www.postgresql.org/docs/
+  - Solana: https://docs.solana.com/
+  - Helius RPC: https://docs.helius.dev/
+  - Raydium: https://docs.raydium.io/
+  - Uniswap Docs: https://docs.uniswap.org/
+  - Ethers.js v6: https://docs.ethers.org/v6/
+  - Alchemy: https://docs.alchemy.com/
+  - The Graph: https://thegraph.com/docs/en/
+  - CoinGecko API: https://www.coingecko.com/en/api/documentation
+  - GeckoTerminal API: https://www.geckoterminal.com/api/documentation
+  - Jupiter: https://docs.jup.ag/
+  - Telegram Bot API: https://core.telegram.org/bots/api
+
+14) Metabase dashboard: structure and data model (tables/views can be created from scratch)
+
+- Dashboard goal
+  - Single decision hub for LP: BIO pairs and DAO tokens state, market activity, our positions, LP investment priorities by GAP, alerts, data freshness.
+
+- Main pages (dashlets)
+  1. Executive Overview
+     - KPIs: Total Portfolio Value, Total Positions, Active Networks, 24h Volume (sum), Net Flow 24h, Top 5 LP Gaps, Top 5 Movers (price 24h).
+     - Charts: Portfolio Value timeseries; Volume by Network; Positions by Network.
+     - Filters: date, network, token/pair.
+  2. BIO Pairs Monitor
+     - Table (real + virtual with flag): network, pool_name, dex, market_address, tvl_usd, volume_24h_usd, trades_24h, buy_24h_usd, sell_24h_usd, net_flow_24h_usd, bio_price_usd, target_lp_value_usd, our_position_value_usd, lp_gap_usd, is_bio_pair, price_change_24h_percent, tvl_change_7d_percent, updated_at.
+     - Filters: network, min volume, exclude virtual pairs.
+     - Drilldown: Pool Details.
+  3. Token Dashboard
+     - Cards: current price, FDV, MC, total TVL (across pools), price_change_24h/7d, tvl_7d_change.
+     - Charts: Price OHLC (daily), Total TVL (7d).
+     - Filters: token, network.
+  4. Pool Details
+     - Header: network, pool_name, dex, market_address, fee, TVL, volume_24h_usd, trades_24h, buy/sell, net_flow.
+     - Charts: TVL timeseries (from `lp_pool_snapshots`), trades/volume timeseries (aggregates), price timeseries (from `token_price_history` / best market).
+     - Tables: last 24h trades (`view_trades_24h`), Whales (`view_large_trades`).
+  5. Positions (Our positions)
+     - Table of latest snapshots per `position_mint`: pool, network, position_value_usd, fees_usd, in_range, tick_lower/upper vs current, created_at.
+     - Filters: network, in_range=false, min position_value.
+  6. Trades Activity
+     - Network/pool summary: `trades_24h`, `volume_24h_usd`, `net_flow_24h_usd`.
+     - Charts: trade size distribution, trades per hour.
+  7. Alerts & Events
+     - Table: timestamp, network, pool_address/market_address, event_type (large_buy/sell, inactivity, volatility), amount_usd, tx_hash, details.
+  8. Health & Freshness
+     - Tiles: max(created_at) per key tables, record counts for last 24/48h, missing metrics counters (FDV/MC/price/volumes), VIEW join statuses.
+
+- Data sources for Metabase (views/tables)
+  - Keep and use: `bio_dao_lp_support` and materialized `bio_dao_lp_support_m`.
+  - Latest snapshots (views):
+    - `view_latest_lp_position_snapshots`: last row per `position_mint` (per network).
+    - `view_latest_lp_pool_snapshots`: last row per `(pool_address, network)`.
+    - `view_latest_dao_pool_snapshots`: last row per `(pool_address, network)`.
+  - Trading activity:
+    - `view_trades_24h`: 24h aggregates per pool (volume, trades, buy/sell, net_flow) — fed by Bitquery batch.
+    - `view_large_trades`: trades above threshold for last 24–72h.
+  - Events/alerts:
+    - `lp_pool_activities` + `view_recent_activities` (last N days).
+  - Data freshness:
+    - `view_data_freshness`: max(created_at) and counts per table/network; freshness flags.
+
+- From-scratch (no SQL here, only structure)
+  - Tables:
+    - `lp_pool_activities` (events; fields listed above).
+    - `lp_trades_aggregates_24h` (optional denormalized 24h aggregates): `pool_address`, `network`, `window_start`, `window_end`, `volume_usd`, `trades_count`, `buy_usd`, `sell_usd`, `net_flow_usd`, `source`, `created_at`.
+  - Views:
+    - `view_latest_lp_position_snapshots`, `view_latest_lp_pool_snapshots`, `view_latest_dao_pool_snapshots` (last-per-key).
+    - `bio_dao_lp_support_m` (materialized) with 24h aggregates.
+    - `view_trades_24h`, `view_large_trades`, `view_recent_activities`, `view_data_freshness` for Metabase.
+  - Indexes (recommended):
+    - Snapshots: `(pool_address, network, created_at DESC)`, positions: `(position_mint, created_at DESC)`, `(network, created_at DESC)`.
+    - Aggregates: `(pool_address, network, window_end DESC)`.
+
+- Metabase parameters/filters
+  - Period (date/time), network, token/pair, min USD volume/trade, include/exclude virtual BIO pairs.
+
+- Quality checkpoints
+  - BIO pairs in VIEW vs actual pools/positions; address/name alignment.
+  - 24h volumes convergence vs reference source; no zero metrics when market is active.
+  - Data freshness: reports not older than X hours per network.

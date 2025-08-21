@@ -46,6 +46,8 @@ class DAOPoolsSnapshotGenerator:
         except ImportError as e:
             print(f"⚠️ TokenDataAggregator недоступен: {e}")
             self.token_aggregator = None
+        # Храним загруженные DAO токены для последующего использования
+        self.dao_tokens: Dict[str, Dict[str, Any]] = {}
     
     def _load_known_pool_addresses(self):
         """Загружает белый список известных адресов пулов из tokens_pools_config.json"""
@@ -670,6 +672,7 @@ class DAOPoolsSnapshotGenerator:
         
         # Загружаем DAO токены для расчетов
         dao_tokens = await self.load_dao_tokens_for_calculations()
+        self.dao_tokens = dao_tokens or {}
         
         # Загружаем наши позиции из Supabase
         our_positions = await self.load_our_positions_from_supabase()
@@ -1413,7 +1416,7 @@ async def main():
             
             # Собираем исторические данные цен токенов (используем уже загруженные dao_tokens)
             async with httpx.AsyncClient() as client:
-                await generator.collect_token_price_history(snapshots, dao_tokens, client)
+                await generator.collect_token_price_history(snapshots, generator.dao_tokens, client)
         
         print(f"\n✅ СНАПШОТ ЗАВЕРШЕН")
         print(f"📁 Файл: {csv_file}")

@@ -165,10 +165,8 @@ class MultiChainReportGenerator:
             from datetime import datetime, timedelta
             two_days_ago = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
             
-            positions_result = supabase_handler.client.table('lp_position_snapshots').select('*').not_.like(
-                'position_mint', 'ethereum_%'
-            ).not_.like(
-                'position_mint', 'base_%'
+            positions_result = supabase_handler.client.table('lp_position_snapshots').select('*').eq(
+                'network', 'solana'
             ).gte('created_at', two_days_ago).order('created_at', desc=True).execute()
             
             # Убираем дублирование - берем только последнюю запись для каждой position_mint
@@ -178,17 +176,8 @@ class MultiChainReportGenerator:
                 if pos_mint not in unique_positions:
                     unique_positions[pos_mint] = pos
             
-            # Фильтруем нулевую ликвидность и преобразуем обратно в список
-            filtered_unique_positions_map = {}
-            for k, pos in unique_positions.items():
-                liquidity_raw = pos.get('liquidity', '0')
-                try:
-                    liquidity_value = float(str(liquidity_raw))
-                except Exception:
-                    liquidity_value = 0.0
-                if liquidity_value > 0:
-                    filtered_unique_positions_map[k] = pos
-            positions_result.data = list(filtered_unique_positions_map.values())
+            # Безопасно: не выкидываем позиции по нулевой ликвидности
+            positions_result.data = list(unique_positions.values())
             
             if not pools_result.data:
                 print("⚠️ Нет свежих данных Solana в Supabase")
@@ -199,12 +188,19 @@ class MultiChainReportGenerator:
             total_value = 0
             total_yield = 0
             
-            # Фильтруем уникальные позиции по минимальной стоимости И активности и адаптируем поля
+            # Хелпер для безопасного чтения стоимости позиции
+            def _parse_position_value(p: Dict[str, Any]) -> float:
+                val = p.get('position_value_usd', None)
+                try:
+                    return float(val) if val is not None else 0.0
+                except Exception:
+                    return 0.0
+
+            # Фильтруем уникальные позиции по минимальной стоимости и адаптируем поля (без жёсткого отсечения по нулям/ликвидности)
             filtered_unique_positions = []
             for pos in positions_result.data:
-                # Проверяем что позиция активна (стоимость > минимальной И > 0)
-                position_value = pos.get('position_value_usd', 0)
-                if position_value >= min_value_usd and position_value > 0:
+                position_value = _parse_position_value(pos)
+                if position_value >= min_value_usd:
                     # Дополнительная проверка свежести данных (не старше 7 дней)
                     try:
                         from datetime import datetime, timezone
@@ -213,7 +209,7 @@ class MultiChainReportGenerator:
                         
                         if days_old <= 2:  # Только очень свежие данные (не старше 2 дней)
                             # Адаптируем поля позиции для совместимости с форматтером
-                            pos['position_value'] = pos['position_value_usd']  # Дублируем для совместимости
+                            pos['position_value'] = position_value  # Дублируем для совместимости
                             pos['pool_address'] = pos['pool_id']  # Для Solana pool_id = pool_address
                             filtered_unique_positions.append(pos)
                             print(f"   ✅ Позиция включена: {pos.get('position_mint', 'N/A')[-8:]}... (${position_value:,.2f}, {days_old} дней)")
@@ -222,7 +218,7 @@ class MultiChainReportGenerator:
                     except Exception as e:
                         print(f"   ⚠️ Ошибка проверки даты позиции {pos.get('position_mint', 'N/A')[-8:]}...: {e}")
                         # В случае ошибки парсинга даты, включаем позицию если она соответствует другим критериям
-                        pos['position_value'] = pos['position_value_usd']
+                        pos['position_value'] = position_value
                         pos['pool_address'] = pos['pool_id']
                         filtered_unique_positions.append(pos)
                 else:
@@ -236,9 +232,16 @@ class MultiChainReportGenerator:
                     positions_by_pool[pool_id] = []
                 positions_by_pool[pool_id].append(pos)
             
-            # Убираем дублирование пулов - берем только последние записи для каждого pool_id
+            # Убираем дублирование пулов - берем только последние записи для каждого pool_id (и только свежие)
             unique_pools = {}
             for pool in pools_result.data:
+                try:
+                    from datetime import datetime, timezone, timedelta
+                    created_at = datetime.fromisoformat(pool['created_at'].replace('Z', '+00:00'))
+                    if (datetime.now(timezone.utc) - created_at) > timedelta(days=2):
+                        continue  # пропускаем несвежие пулы
+                except Exception:
+                    pass  # в случае проблем с датой всё равно включим
                 pool_id = pool['pool_id']
                 if pool_id not in unique_pools:
                     unique_pools[pool_id] = pool
@@ -246,7 +249,10 @@ class MultiChainReportGenerator:
             # Формируем данные пулов с позициями (в формате, который ожидает _format_solana_section)
             for pool in unique_pools.values():
                 pool_positions = positions_by_pool.get(pool['pool_id'], [])
-                pool_value = sum(pos['position_value_usd'] for pos in pool_positions)
+                # Безопасная сумма по числовому значению позиции
+                pool_value = 0.0
+                for p in pool_positions:
+                    pool_value += _parse_position_value(p)
                 pool_yield = sum(pos['fees_usd'] for pos in pool_positions)
                 
                 pool_info = {
@@ -461,22 +467,37 @@ class MultiChainReportGenerator:
                 if pos_mint not in unique_positions:
                     unique_positions[pos_mint] = pos
             
-            # Фильтруем активные позиции ПОСЛЕ дедупликации
-            active_positions = []
-            for pos in unique_positions.values():
-                liquidity_raw = pos.get('liquidity', '0')
-                try:
-                    liquidity_value = float(str(liquidity_raw))
-                except Exception:
-                    liquidity_value = 0.0
-                if liquidity_value > 0 and pos.get('position_value_usd', 0) >= min_value_usd:
-                    active_positions.append(pos)
-            positions_result.data = active_positions
-            
-            # Получаем данные пулов для контекста
+            # Получаем данные пулов для контекста (Base, свежие ≤ 2 дней)
             pools_result = supabase_handler.client.table('lp_pool_snapshots').select('*').eq(
                 'network', 'base'
             ).gte('created_at', '2025-07-28').order('created_at', desc=True).execute()
+
+            # Множество валидных Base-пулов по свежести (≤ 2 дней) и валидным адресам
+            valid_base_pool_ids = set()
+            try:
+                from datetime import datetime, timezone, timedelta
+                for pool in (pools_result.data or []):
+                    try:
+                        created_at = datetime.fromisoformat(pool['created_at'].replace('Z', '+00:00'))
+                        if (datetime.now(timezone.utc) - created_at) > timedelta(days=2):
+                            continue
+                    except Exception:
+                        pass
+                    pool_addr = (pool.get('pool_address') or pool.get('pool_id') or '').lower()
+                    if pool_addr.startswith('0x') and len(pool_addr) == 42:
+                        valid_base_pool_ids.add(pool.get('pool_id', pool_addr))
+            except Exception:
+                pass
+
+            # Фильтруем позиции ПОСЛЕ дедупликации: принадлежность валидному Base-пулу и корректные EVM-адреса токенов
+            vetted_positions = []
+            for pos in unique_positions.values():
+                pool_id = (pos.get('pool_id') or '').lower()
+                token0_ok = str(pos.get('token0_address', '')).lower().startswith('0x')
+                token1_ok = str(pos.get('token1_address', '')).lower().startswith('0x')
+                if pool_id in {p.lower() for p in valid_base_pool_ids} and token0_ok and token1_ok:
+                    vetted_positions.append(pos)
+            positions_result.data = vetted_positions
             
             # Адаптируем данные для совместимости с ReportFormatter
             base_positions = positions_result.data if positions_result.data else []
