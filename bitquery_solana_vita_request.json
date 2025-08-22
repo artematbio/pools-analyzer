@@ -1,4 +1,0 @@
-{
-  "query": "query LatestTrades($mint: String!){ Solana { DEXTradeByTokens( orderBy: {descending: Block_Time}, limit: {count: 5}, where: { Trade: { Currency: { MintAddress: { is: $mint } }, Side: { Currency: { MintAddress: { in: [\"So11111111111111111111111111111111111111112\", \"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\"] } } }, Dex: { Name: { is: \"Raydium\" } } } } ) { Block { Time Slot } Transaction { Signature } Trade { AmountInUSD PriceInUSD Currency { Symbol MintAddress } Side { Currency { Symbol MintAddress } } Market { MarketAddress } Dex { ProtocolName ProtocolFamily Name } } } }",
-  "variables": { "mint": "vita3LfgKErA37DWA7W8RBks3c7Rym2hPFgizNRshBi" }
-}

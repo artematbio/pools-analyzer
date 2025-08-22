@@ -39,7 +39,8 @@ class MultiChainReportGenerator:
         self.wallets = {
             "solana": [
                 "BpvSz1bQ7qHb7qAD748TREgSPBp6i6kukukNVgX49uxD",
-                "EKuXYJ1Shg38u67vT91YbucttoG1RKCneXF1aEhXq8K6"
+                "EKuXYJ1Shg38u67vT91YbucttoG1RKCneXF1aEhXq8K6",
+                "FP5gmCCaNGFf6q1x5TBcpwxGQLRP8JFfwEcAQom5WC8K"
             ],
             "ethereum": [
                 "0x31AAc4021540f61fe20c3dAffF64BA6335396850",

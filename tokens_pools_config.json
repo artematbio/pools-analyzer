@@ -214,6 +214,20 @@
         "address": "vita3LfgKErA37DWA7W8RBks3c7Rym2hPFgizNRshBi",
         "decimals": 9,
         "coingecko_id": "vitadao"
+      },
+      {
+        "symbol": "RAP",
+        "name": "RAP Token",
+        "address": "DUgNuNxVxnu2bPz2oDEht9kckHTvXLgcJLA6VN5drug",
+        "decimals": 6,
+        "coingecko_id": "rap-token"
+      },
+      {
+        "symbol": "OMIPAL",
+        "name": "OMIPAL Token",
+        "address": "QhTnsX1EP84LeY3xZZND6V9mVp2oos6HjY5QCDAdrug",
+        "decimals": 6,
+        "coingecko_id": "omipal-token"
       }
     ]
   },
@@ -623,6 +637,22 @@
         "fee_tier": 2500,
         "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
         "token1": "vita3LfgKErA37DWA7W8RBks3c7Rym2hPFgizNRshBi"
+      },
+      {
+        "name": "BIO/RAP",
+        "address": "H58TC6cVVnBQ3TL6Q7YrQ6bQnumYBfraybcsad54tBTh",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "token1": "DUgNuNxVxnu2bPz2oDEht9kckHTvXLgcJLA6VN5drug"
+      },
+      {
+        "name": "BIO/OMIPAL",
+        "address": "CFFQHJQZd7SatSRLiGD1ehVaHsxpesNqyeSXBLyLh9cy",
+        "protocol": "raydium_clmm",
+        "fee_tier": 2500,
+        "token0": "bioJ9JTqW62MLz7UKHU69gtKhPpGi1BQhccj2kmSvUJ",
+        "token1": "QhTnsX1EP84LeY3xZZND6V9mVp2oos6HjY5QCDAdrug"
       }
     ]
   }

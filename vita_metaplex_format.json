@@ -1,9 +1,0 @@
-{
-  "name": "VitaDAO",
-  "symbol": "VITA",
-  "uri": "https://your-domain.com/vita-metadata.json",
-  "sellerFeeBasisPoints": 0,
-  "creators": null,
-  "collection": null,
-  "uses": null
-}

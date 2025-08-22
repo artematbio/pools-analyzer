@@ -38,6 +38,8 @@ TARGET_POOL_ID_7 = "HMWSMe7PVmwmiRccbTW14BkKj54x3XESgBgqAshTutaA" # BIO/RIF
 TARGET_POOL_ID_8 = "FErC1cX1tH2mGRpzfXpeAiNMe6Zu2zpQSeqteDAm9W49" # BIO/URO
 TARGET_POOL_ID_9 = "FgCQoL7tcC1nkNazV5onEgWbm9UJ9nbzqo9rZCYm6Yi4" # SOL/MYCO
 TARGET_POOL_ID_10 = "HhtxoFCY7uxQKBP1AHVXhCQ3jYtRWL3n1CwBKcfoun5Q" # BIO/MYCO
+TARGET_POOL_ID_11 = "H58TC6cVVnBQ3TL6Q7YrQ6bQnumYBfraybcsad54tBTh" # BIO/RAP
+TARGET_POOL_ID_12 = "CFFQHJQZd7SatSRLiGD1ehVaHsxpesNqyeSXBLyLh9cy" # BIO/OMIPAL
 
 # Собираем их в список для итерации, отфильтровывая пустые или None значения
 PRIMARY_TARGET_POOL_IDS = [
@@ -51,7 +53,9 @@ PRIMARY_TARGET_POOL_IDS = [
         TARGET_POOL_ID_7,
         TARGET_POOL_ID_8,
         TARGET_POOL_ID_9,
-        TARGET_POOL_ID_10
+        TARGET_POOL_ID_10,
+        TARGET_POOL_ID_11,
+        TARGET_POOL_ID_12
     ] if pid and pid.strip()
 ]
 
@@ -64,7 +68,8 @@ BITQUERY_API_KEY = "ory_at_OI5h53-hz23D-ugNFUQobJPWBt_Ut7EA3AzPdi1de3o.3x2G8ub_P
 BITQUERY_ENDPOINT = "https://streaming.bitquery.io/eap"
 TARGET_WALLET_ADDRESSES = [
     "BpvSz1bQ7qHb7qAD748TREgSPBp6i6kukukNVgX49uxD",  # Первый кошелек
-    "EKuXYJ1Shg38u67vT91YbucttoG1RKCneXF1aEhXq8K6"   # Второй кошелек
+    "EKuXYJ1Shg38u67vT91YbucttoG1RKCneXF1aEhXq8K6",  # Второй кошелек
+    "FP5gmCCaNGFf6q1x5TBcpwxGQLRP8JFfwEcAQom5WC8K"   # Третий кошелек (новый)
 ]
 TARGET_WALLET_ADDRESS = TARGET_WALLET_ADDRESSES[0]  # Оставляем для обратной совместимости
 TARGET_POOL_ID = TARGET_POOL_ID_1  # Оставляем для обратной совместимости
