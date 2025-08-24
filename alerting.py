@@ -292,10 +292,26 @@ class AlertingSystem:
                     helius_api_key
                 )
             
-            # Filter out of range positions
+            # Filter out of range positions AND exclude closed positions
             current_out_of_range_positions = []
             for pos in all_positions:
-                if pos.get('in_range') is False:
+                # ✅ ИСПРАВЛЕНИЕ: Проверяем что позиция активна (не закрыта)
+                liquidity_raw = pos.get('liquidity', '0')
+                try:
+                    liquidity_value = float(str(liquidity_raw))
+                except Exception:
+                    liquidity_value = 0.0
+                
+                # Проверяем стоимость позиции
+                try:
+                    position_value = float(pos.get('position_value_usd', 0) or 0)
+                except Exception:
+                    position_value = 0.0
+                
+                # Позиция должна быть out of range, иметь ликвидность и минимальную стоимость
+                if (pos.get('in_range') is False and 
+                    liquidity_value > 0 and 
+                    position_value >= 100):
                     current_out_of_range_positions.append(pos)
             
             now = datetime.now(timezone.utc)

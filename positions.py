@@ -1336,8 +1336,25 @@ async def get_clmm_positions(
              })
 
 
-    print(f"Successfully processed {len(final_positions_output)} CLMM positions for wallet {wallet_address}")
-    return final_positions_output
+    # ✅ ИСПРАВЛЕНИЕ: Фильтруем закрытые позиции (нулевая ликвидность)
+    active_positions = []
+    for pos in final_positions_output:
+        try:
+            liquidity_value = float(pos.get('liquidity', '0'))
+            position_value = float(pos.get('position_value_usd_str', '0'))
+            
+            # Включаем только позиции с ликвидностью > 0 и стоимостью > 0
+            if liquidity_value > 0 and position_value > 0:
+                active_positions.append(pos)
+            else:
+                print(f"[FILTER] Excluding closed position {pos.get('position_mint', 'N/A')[-8:]}... (liquidity: {liquidity_value}, value: ${position_value})")
+        except Exception as e:
+            print(f"[FILTER] Error checking position {pos.get('position_mint', 'N/A')}: {e}")
+            # В случае ошибки включаем позицию
+            active_positions.append(pos)
+    
+    print(f"Successfully processed {len(active_positions)} active CLMM positions for wallet {wallet_address} (filtered out {len(final_positions_output) - len(active_positions)} closed positions)")
+    return active_positions
 
 # Пример вызова (для тестирования внутри этого файла)
 async def _test_positions():
