@@ -197,11 +197,20 @@ class MultiChainReportGenerator:
                 except Exception:
                     return 0.0
 
-            # Фильтруем уникальные позиции по минимальной стоимости и адаптируем поля (без жёсткого отсечения по нулям/ликвидности)
+            # Фильтруем уникальные позиции по минимальной стоимости и исключаем закрытые позиции
             filtered_unique_positions = []
             for pos in positions_result.data:
                 position_value = _parse_position_value(pos)
-                if position_value >= min_value_usd:
+                
+                # ✅ ИСПРАВЛЕНИЕ: Фильтруем закрытые позиции (нулевая ликвидность)
+                liquidity_raw = pos.get('liquidity', '0')
+                try:
+                    liquidity_value = float(str(liquidity_raw))
+                except Exception:
+                    liquidity_value = 0.0
+                
+                # Позиция должна иметь и стоимость, и ликвидность
+                if position_value >= min_value_usd and liquidity_value > 0:
                     # Дополнительная проверка свежести данных (не старше 7 дней)
                     try:
                         from datetime import datetime, timezone

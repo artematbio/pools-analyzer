@@ -427,10 +427,13 @@ class AlertingSystem:
                 logging.warning("Supabase не подключен для proximity checks")
                 return False
             
-            # Получаем все позиции из Supabase (с минимальной стоимостью $100)
+            # Получаем все позиции из Supabase (свежие данные за последние 3 дня)
+            from datetime import datetime, timezone, timedelta
+            cutoff_date = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
+            
             positions_result = supabase_handler.client.table('lp_position_snapshots').select(
                 'position_mint, pool_name, pool_id, network, position_value_usd, tick_lower, tick_upper, created_at, liquidity'
-            ).gte('position_value_usd', 100).order('created_at', desc=True).execute()
+            ).gte('created_at', cutoff_date).order('created_at', desc=True).execute()
             
             if not positions_result.data:
                 logging.info("Нет позиций для proximity проверки")
@@ -444,7 +447,7 @@ class AlertingSystem:
                 if pos_mint not in unique_positions:
                     unique_positions[pos_mint] = pos
 
-            # Фильтруем позиции без ликвидности (закрытые/обнуленные)
+            # Фильтруем позиции без ликвидности (закрытые/обнуленные) и минимальной стоимости
             filtered_unique_positions = {}
             for mint, pos in unique_positions.items():
                 liquidity_raw = pos.get('liquidity', '0')
@@ -452,7 +455,15 @@ class AlertingSystem:
                     liquidity_value = float(str(liquidity_raw))
                 except Exception:
                     liquidity_value = 0.0
-                if liquidity_value > 0:
+                
+                # Проверяем стоимость позиции
+                try:
+                    position_value = float(pos.get('position_value_usd', 0) or 0)
+                except Exception:
+                    position_value = 0.0
+                
+                # Позиция должна иметь и ликвидность, и минимальную стоимость $100
+                if liquidity_value > 0 and position_value >= 100:
                     filtered_unique_positions[mint] = pos
             unique_positions = filtered_unique_positions
 
