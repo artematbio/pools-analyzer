@@ -486,7 +486,7 @@ class AlertingSystem:
             # Дополнительно: отсекаем устаревшие снапшоты (по умолчанию старше 24 часов)
             try:
                 from datetime import datetime, timezone, timedelta
-                max_age_hours = int(os.getenv('PROXIMITY_MAX_SNAPSHOT_AGE_HOURS', '24'))
+                max_age_hours = int(os.getenv('PROXIMITY_MAX_SNAPSHOT_AGE_HOURS', '4'))
                 fresh_positions = {}
                 now_ts = datetime.now(timezone.utc)
                 for mint, pos in unique_positions.items():
