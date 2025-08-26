@@ -2671,8 +2671,16 @@ async def save_report_to_file(pools_data: List[Dict[str, Any]], token_prices: Di
                 report_lines.append("")
                 report_lines.append("Position details:")
                 for j, pos in enumerate(pool_positions, 1):
-                    pos_value = float(pos.get('position_value_usd_str', 0))
-                    pos_fees = float(pos.get('fees_usd', 0))
+                    # ✅ ИСПРАВЛЕНИЕ: Правильное извлечение значений
+                    try:
+                        pos_value = float(pos.get('position_value_usd_str', '0'))
+                    except (ValueError, TypeError):
+                        pos_value = 0.0
+                    
+                    try:
+                        pos_fees = float(pos.get('total_pending_yield_usd_str', pos.get('fees_usd', '0')))
+                    except (ValueError, TypeError):
+                        pos_fees = 0.0
                     pos_mint = pos.get('position_mint', 'N/A')[:8] + "..."
                     in_range_status = "✅ In range" if pos.get('in_range', False) else "❌ Out of range"
                     

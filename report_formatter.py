@@ -861,7 +861,8 @@ Change: {change_sign}${change_amount:,.2f} ({change_percent:+.1f}%)
         section = []
         
         try:
-            pools = solana_data.get('pools', [])
+            # ✅ ИСПРАВЛЕНИЕ: Проверяем разные названия ключей
+            pools = solana_data.get('pools_data', solana_data.get('pools', []))
             
             if not pools:
                 return ["No Solana positions found", ""]
@@ -902,9 +903,19 @@ Change: {change_sign}${change_amount:,.2f} ({change_percent:+.1f}%)
                 if positions:
                     section.append("  📍 Positions:")
                     for pos in positions:
-                        # Пробуем разные поля для значения позиции
-                        pos_value = pos.get('position_value_usd', pos.get('position_value', pos.get('value', 0)))
-                        pos_yield = pos.get('fees_usd', pos.get('yield', 0))
+                        # ✅ ИСПРАВЛЕНИЕ: Используем правильные поля из positions.py
+                        pos_value_str = pos.get('position_value_usd_str', pos.get('position_value_usd', pos.get('position_value', '0')))
+                        try:
+                            pos_value = float(pos_value_str)
+                        except (ValueError, TypeError):
+                            pos_value = 0.0
+                            
+                        # Для fees используем разные источники
+                        pos_yield_str = pos.get('total_pending_yield_usd_str', pos.get('unclaimed_fees_total_usd_str', pos.get('fees_usd', '0')))
+                        try:
+                            pos_yield = float(pos_yield_str)
+                        except (ValueError, TypeError):
+                            pos_yield = 0.0
                         nft_id = pos.get('position_mint', pos.get('nft_id', 'Unknown'))
                         
                         # Определяем статус in_range из данных позиции
