@@ -164,7 +164,7 @@ class MultiChainReportGenerator:
             
             # Получаем ТОЛЬКО СВЕЖИЕ позиции Solana (последние 2 дня)
             from datetime import datetime, timedelta
-            two_days_ago = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+            two_days_ago = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%d')
             
             positions_result = supabase_handler.client.table('lp_position_snapshots').select('*').eq(
                 'network', 'solana'
@@ -263,7 +263,12 @@ class MultiChainReportGenerator:
                 pool_value = 0.0
                 for p in pool_positions:
                     pool_value += _parse_position_value(p)
-                pool_yield = sum(pos['fees_usd'] for pos in pool_positions)
+                pool_yield = 0.0
+                for pos in pool_positions:
+                    try:
+                        pool_yield += float(pos.get('fees_usd') or 0)
+                    except Exception:
+                        continue
                 
                 pool_info = {
                     'name': pool['pool_name'],
