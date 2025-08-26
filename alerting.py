@@ -483,6 +483,26 @@ class AlertingSystem:
                     filtered_unique_positions[mint] = pos
             unique_positions = filtered_unique_positions
 
+            # Дополнительно: отсекаем устаревшие снапшоты (по умолчанию старше 24 часов)
+            try:
+                from datetime import datetime, timezone, timedelta
+                max_age_hours = int(os.getenv('PROXIMITY_MAX_SNAPSHOT_AGE_HOURS', '24'))
+                fresh_positions = {}
+                now_ts = datetime.now(timezone.utc)
+                for mint, pos in unique_positions.items():
+                    try:
+                        created_at = datetime.fromisoformat(pos['created_at'].replace('Z', '+00:00'))
+                        age_hours = (now_ts - created_at).total_seconds() / 3600.0
+                        if age_hours <= max_age_hours:
+                            fresh_positions[mint] = pos
+                    except Exception:
+                        # Если дата некорректная, безопасно пропускаем позицию
+                        continue
+                unique_positions = fresh_positions
+            except Exception:
+                # В случае любых ошибок оставляем текущий набор позиций
+                pass
+
             # Пересобираем список пулов, для которых нужны current_tick
             pool_ids_needed = set()
             for pos in unique_positions.values():
