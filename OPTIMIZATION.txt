@@ -12,6 +12,11 @@ POOLS-ANALYZER — FULL ENHANCEMENT PLAN (BITQUERY INTEGRATION AND ANALYTICS EXP
   - Detection of trades > $X (configurable) within ≤ 1 minute.
   - Daily refresh of price/FDV/MC for all DAO tokens.
 
+  Implementation notes
+  - Owners: data platform (Supabase schema), collectors (Solana/EVM), reporting (Telegram), alerting.
+  - Observability: add freshness dashboards (max(ts) per table) and validation jobs (Section 10/14).
+  - Environments: Railway (scheduler + workers), Supabase (Postgres), external APIs (Helius, Alchemy, Bitquery, CoinGecko, GeckoTerminal).
+
 2) Supabase schema extensions
 - Table `lp_pool_snapshots`: add fields
   - `trades_24h` INTEGER, `buy_24h_usd` DECIMAL, `sell_24h_usd` DECIMAL, `net_flow_24h_usd` DECIMAL,
@@ -24,6 +29,45 @@ POOLS-ANALYZER — FULL ENHANCEMENT PLAN (BITQUERY INTEGRATION AND ANALYTICS EXP
   - `id`, `timestamp`, `network`, `pool_address`, `market_address`, `event_type`, `amount_usd`, `tx_hash`, `details` JSON
 - Materialized VIEW or staging table `bio_dao_lp_support_m`
   - Refresh after `dao_pools_snapshot` finishes; contains last position snapshots, pool aggregates, and stable joins by `pool_name+network` and addresses.
+
+  Dependencies
+  - Supabase/Postgres 14+ (supports materialized views, generated indexes, upsert).
+  - Python supabase client (for migrations that run from app): `pip install supabase`.
+  - Database permissions: service role for DDL + REFRESH MATERIALIZED VIEW.
+
+  SQL (DDL snippets)
+  - Extend lp_pool_snapshots
+    ALTER TABLE lp_pool_snapshots
+      ADD COLUMN IF NOT EXISTS trades_24h INTEGER DEFAULT 0 NOT NULL,
+      ADD COLUMN IF NOT EXISTS buy_24h_usd NUMERIC DEFAULT 0 NOT NULL,
+      ADD COLUMN IF NOT EXISTS sell_24h_usd NUMERIC DEFAULT 0 NOT NULL,
+      ADD COLUMN IF NOT EXISTS net_flow_24h_usd NUMERIC DEFAULT 0 NOT NULL,
+      ADD COLUMN IF NOT EXISTS price_source TEXT,
+      ADD COLUMN IF NOT EXISTS volume_source TEXT,
+      ADD COLUMN IF NOT EXISTS market_address TEXT,
+      ADD COLUMN IF NOT EXISTS dex_protocol TEXT;
+    CREATE INDEX IF NOT EXISTS idx_lp_pool_snapshots_pool_net_created
+      ON lp_pool_snapshots (pool_address, network, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_lp_pool_snapshots_market_created
+      ON lp_pool_snapshots (market_address, created_at DESC);
+
+  - New table lp_pool_activities
+    CREATE TABLE IF NOT EXISTS lp_pool_activities (
+      id BIGSERIAL PRIMARY KEY,
+      timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
+      network TEXT NOT NULL,
+      pool_address TEXT,
+      market_address TEXT,
+      event_type TEXT NOT NULL,
+      amount_usd NUMERIC NOT NULL CHECK (amount_usd >= 0),
+      tx_hash TEXT,
+      details JSONB
+    );
+
+  Implementation steps
+  - Apply DDL in Supabase SQL editor.
+  - Backfill `market_address` for Solana (from Raydium pool or Bitquery detection job).
+  - Start writing sources (price_source/volume_source) on collectors to trace provenance.
 
 3) Bitquery integration
 - Endpoints and principles
@@ -40,6 +84,15 @@ POOLS-ANALYZER — FULL ENHANCEMENT PLAN (BITQUERY INTEGRATION AND ANALYTICS EXP
 - Cache/limits
   - Cache 24h aggregates for 5–15 minutes, apply backoff and request batching.
 
+  Dependencies
+  - Env: BITQUERY_API_KEY, optional: BITQUERY_STREAMING_API_KEY.
+  - Python: `pip install gql aiohttp tenacity` (for GraphQL + retries), or use requests.
+
+  Implementation steps
+  - Add Bitquery adapter module with typed queries and paged fetching.
+  - Add batch job (scheduler) every 15 min to compute 24h aggregates and persist to `lp_pool_snapshots`.
+  - Add simple cache layer (filesystem or Redis if available) with TTL 5–15 min for identical windows.
+
 4) `dao_pools_snapshot.py` enrichment
 - Sources
   - Token price and 24h volume: Bitquery (preferred, by best market), CoinGecko as fallback.
@@ -52,6 +105,15 @@ POOLS-ANALYZER — FULL ENHANCEMENT PLAN (BITQUERY INTEGRATION AND ANALYTICS EXP
   - Persist `trades_24h/volume_24h_usd/buy/sell/net_flow` into `lp_pool_snapshots`.
   - `bio_price_usd`: choose best market (by TVL/volume) across chains.
 
+  Dependencies
+  - Env: SUPABASE_SERVICE_ROLE_KEY, COINGECKO_API_KEY, BITQUERY_API_KEY.
+  - Python: `pip install supabase python-dotenv`.
+
+  Implementation steps
+  - Replace client-side overwrite logic с UPSERT by (pool_address, network, date_trunc('hour', created_at)).
+  - For missing price/FDV — mark data_quality='partial' (new nullable column) вместо записи нулей.
+  - After save, TRIGGER REFRESH MATERIALIZED VIEW CONCURRENTLY `bio_dao_lp_support_m` (Section 5).
+
 5) VIEW `bio_dao_lp_support` quality
 - Logic
   - Join by `pool_name+network` and addresses; include only last position snapshot per `position_mint`.
@@ -61,6 +123,51 @@ POOLS-ANALYZER — FULL ENHANCEMENT PLAN (BITQUERY INTEGRATION AND ANALYTICS EXP
 - QA
   - Validator: sum of our positions per pool vs VIEW; presence of all BIO pairs; 24h volume sanity vs Bitquery.
 
+  SQL template
+  - Latest helpers
+    CREATE OR REPLACE VIEW view_latest_lp_position_snapshots AS
+      SELECT DISTINCT ON (position_mint, network) *
+      FROM lp_position_snapshots
+      ORDER BY position_mint, network, created_at DESC;
+
+    CREATE OR REPLACE VIEW view_latest_lp_pool_snapshots AS
+      SELECT DISTINCT ON (COALESCE(pool_id, pool_address), network) *
+      FROM lp_pool_snapshots
+      ORDER BY COALESCE(pool_id, pool_address), network, created_at DESC;
+
+  - Slim view (with stable keys and safe numeric casts)
+    CREATE MATERIALIZED VIEW IF NOT EXISTS bio_dao_lp_support_m AS
+      SELECT s.network,
+             s.pool_name,
+             s.dex,
+             COALESCE(SUM(COALESCE(lp.position_value_usd::numeric,0)), 0)::NUMERIC AS our_positions_usd,
+             COALESCE(SUM(COALESCE(lp.fees_usd::numeric,0)), 0)::NUMERIC AS our_fees_usd,
+             COUNT(lp.position_mint)::INT AS our_positions_count,
+             s.tvl_usd::NUMERIC,
+             s.volume_24h_usd::NUMERIC
+      FROM view_latest_lp_pool_snapshots s
+      LEFT JOIN view_latest_lp_position_snapshots lp
+        ON lp.network = s.network
+       AND COALESCE(lp.pool_id, lp.pool_address) = COALESCE(s.pool_id, s.pool_address)
+      GROUP BY 1,2,3,6,7;
+    CREATE INDEX IF NOT EXISTS idx_bio_support_m_net ON bio_dao_lp_support_m (network);
+
+  - Refresh policy (scheduler)
+    REFRESH MATERIALIZED VIEW CONCURRENTLY bio_dao_lp_support_m;
+
+  Keying strategy (joins/uniqueness)
+  - Master key: (network, pool_id). Fallback: (network, pool_address). Temporary (DAO legacy): (network, pool_name).
+  - For latest/views and mview JOIN, always include network AND COALESCE(pool_id, pool_address).
+
+  UPSERT / Uniqueness windows
+  - Pools (hourly): UNIQUE INDEX on (COALESCE(pool_id,pool_address), network, date_trunc('hour', created_at)).
+  - Positions (hourly): UNIQUE INDEX on (position_mint, network, date_trunc('hour', created_at)).
+  - See migration 008_add_unique_hourly_upserts.sql.
+
+  Validation steps
+  - Compare `our_positions_count` vs count of unique position_mint per (pool,network) in last snapshots.
+  - Alert if any BIO pool missing from the view.
+
 6) Real-time alerts
 - Subscriptions (EAP Streaming)
   - Large buys/sells > $X for BIO and DAO pairs; inactivity > N hours; volatility/volume spikes.
@@ -68,6 +175,14 @@ POOLS-ANALYZER — FULL ENHANCEMENT PLAN (BITQUERY INTEGRATION AND ANALYTICS EXP
   - Thresholds + windows; group multiple events; throttle repeats.
 - Persistence
   - Save to `lp_pool_activities`; push to Telegram (English only).
+
+  Dependencies
+  - Env: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, BITQUERY_STREAMING token.
+  - Python: `pip install websockets aiohttp` (если используем streaming), или requests for polling.
+
+  Implementation steps
+  - Implement consumer that writes events into `lp_pool_activities`.
+  - Alerting rules read recent events and send aggregated notifications (1 message per pool per window).
 
 7) Position data expansion
 - Solana
@@ -77,11 +192,22 @@ POOLS-ANALYZER — FULL ENHANCEMENT PLAN (BITQUERY INTEGRATION AND ANALYTICS EXP
 - Extra context
   - Add pool current price and `trades_24h` to position snapshots for in-range effectiveness context.
 
+  Implementation steps
+  - Enrich collectors to attach market_address (Solana) and consistent pool_id (EVM v3: pool address; v2: pair address).
+  - Add nullable columns to lp_position_snapshots: current_price NUMERIC, market_address TEXT (Solana).
+
 8) Historical series and factors
 - `token_price_history`
   - Collect daily/hourly OHLCV from best market (Bitquery); compute 24h/7d changes.
 - Factor model for LP prioritization
   - Momentum (1d/7d), market activity (trades_24h, volume_24h), liquidity trend (TVL 7d), net_flow.
+
+  Dependencies
+  - Storage size in Supabase; potential compression on time-series tables.
+
+  Implementation steps
+  - Hourly cron to backfill and append OHLCV; deduplicate by UNIQUE(token,network,hour).
+  - Precompute factors into a materialized view `view_lp_factors` and use it in dashboards.
 
 9) Reporting (Telegram)
 - Add Market Activity block
@@ -89,15 +215,28 @@ POOLS-ANALYZER — FULL ENHANCEMENT PLAN (BITQUERY INTEGRATION AND ANALYTICS EXP
 - Flexible parameters
   - Min trade size, tokens/networks filter, activity filter.
 
+  Implementation steps
+  - Read from `bio_dao_lp_support_m` and `view_trades_24h`; avoid raw tables.
+  - Add CLI flags/env overrides: MIN_TRADE_USD, NETWORKS, INCLUDE_VIRTUAL.
+
 10) Tests and QA
 - Reference set of pools/tokens (BIO/RIF, BIO/WSOL, RIF/WSOL, ETH/BIO, etc.) with N days of snapshots.
 - Unit tests for Bitquery adapter (time filters, field mapping, buy/sell logic, Jupiter market handling).
 - Integration tests: compare 24h metrics vs independent source.
 
+  Implementation steps
+  - Synthetic fixtures for Solana/EVM (small JSON payloads) to avoid hitting real APIs in CI.
+  - Contract tests for view `bio_dao_lp_support_m` vs raw aggregations.
+  - Data freshness tests: assert max(created_at) per table < threshold.
+
 11) Risks and mitigation
 - Rate limits/cost: batching, caching, exponential backoff, 24h windows updated every 5–15 minutes.
 - Schema differences (V1/EAP): single adapter with contract tests.
 - Empty/anomalous data: fallbacks, price/volume sanity filters, data-quality flags, market-pause alerts.
+
+  Operational safeguards
+  - Circuit breaker on external APIs; fallback to last-known-good with flag in DB.
+  - Canary pools to validate new logic before global rollout.
 
 12) Roadmap (no production logic changes until approved)
 - Stage 1 (R&D):
@@ -110,6 +249,12 @@ POOLS-ANALYZER — FULL ENHANCEMENT PLAN (BITQUERY INTEGRATION AND ANALYTICS EXP
   - Real-time alerts, event persistence, fine-tuning.
 - Stage 5 (Factors and scoring):
   - Historical series, factor model for LP prioritization.
+
+  Dependencies & gating
+  - Stage 1 requires BITQUERY_API_KEY only.
+  - Stage 2 requires DDL applied + service role key available to writer jobs.
+  - Stage 3 requires scheduler to REFRESH mview and QA dashboards in Metabase.
+  - Stage 4 requires WebSocket infra (EAP streaming) and Telegram rate-limit guards.
 
 13) Combined principles (from ARCHITECTURE) and external docs
 
@@ -190,6 +335,37 @@ POOLS-ANALYZER — FULL ENHANCEMENT PLAN (BITQUERY INTEGRATION AND ANALYTICS EXP
     - `lp_pool_activities` + `view_recent_activities` (last N days).
   - Data freshness:
     - `view_data_freshness`: max(created_at) and counts per table/network; freshness flags.
+
+  Implementation steps
+  - Create Metabase connections to Supabase; hide raw tables, expose only curated views.
+  - Build freshness tiles: SELECT max(created_at) FROM each curated view.
+  - Create drilldowns from BIO Pairs Monitor to Pool Details; wire filters to `pool_address`/`market_address`.
+
+  Required env / dependencies
+  - Metabase (Docker or hosted), Supabase credentials (read-only user recommended).
+
+  Quality gates
+  - Dashboards show non-zero activity for active markets; alerts visible within 1–5 min; freshness < X hours.
+
+  —
+  Addendum: Core Normalized Schema (proposal) for stability and data quality
+  - pools (pool_id, network, dex, protocol, token0, token1, fee_tier, PRIMARY KEY(network,pool_id))
+  - positions (position_id, wallet, network, pool_id, created_at, closed_at, tick_lower, tick_upper, liquidity_last, status, PRIMARY KEY(network,position_id))
+  - position_snapshots (id, position_id, ts, value_usd NUMERIC NOT NULL, fees_usd NUMERIC NOT NULL, in_range BOOL NOT NULL, liquidity NUMERIC NOT NULL, UNIQUE(position_id, date_trunc('hour', ts)))
+  - pool_snapshots (id, pool_id, ts, tvl_usd NUMERIC NOT NULL, volume_24h_usd NUMERIC NOT NULL, UNIQUE(pool_id, date_trunc('hour', ts)))
+  - dao_targets (pool_id, day DATE, target_lp_value_usd, target_fdv_pct, UNIQUE(pool_id, day))
+  - token_metrics (token_address, network, ts, price_usd, fdv_usd, mc_usd, UNIQUE(token_address, network, date_trunc('hour', ts)))
+
+  Constraints & policies
+  - Enforce NOT NULL on numeric metrics, CHECK(value_usd>=0, liquidity>=0).
+  - Server-side timestamps (DEFAULT now()).
+  - All ingestion avoids *_str stored values; formatting only at report layer.
+
+  Migration plan
+  - Create new tables alongside legacy ones; backfill with DISTINCT ON latest per key.
+  - Provide compatibility views mapping old names → new schema for a transition period.
+  - Switch readers (reports/alerts) to curated latest views, then move writers to new tables with ON CONFLICT.
+  - Drop legacy columns/views after validation window.
 
 - From-scratch (no SQL here, only structure)
   - Tables:
