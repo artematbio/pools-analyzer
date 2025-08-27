@@ -157,13 +157,14 @@ class MultiChainReportGenerator:
             
             print("🗄️ Получаем данные Solana из Supabase...")
             
-            # Получаем последние данные пулов Solana
+            # Получаем последние данные пулов Solana (последние 7 дней)
+            from datetime import datetime, timedelta
+            week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
             pools_result = supabase_handler.client.table('lp_pool_snapshots').select('*').eq(
                 'network', 'solana'
-            ).gte('created_at', '2025-07-28').order('created_at', desc=True).execute()
+            ).gte('created_at', week_ago).order('created_at', desc=True).execute()
             
             # Получаем ТОЛЬКО СВЕЖИЕ позиции Solana (последние 2 дня)
-            from datetime import datetime, timedelta
             two_days_ago = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
             
             positions_result = supabase_handler.client.table('lp_position_snapshots').select('*').eq(
@@ -211,11 +212,10 @@ class MultiChainReportGenerator:
                 
                 # Позиция должна иметь и стоимость, и ликвидность
                 if position_value >= min_value_usd and liquidity_value > 0:
-                    # Дополнительная проверка свежести данных (не старше 7 дней)
+                    # Дополнительная проверка свежести данных (не старше 2 дней)
                     try:
-                        from datetime import datetime, timezone
                         created_at = datetime.fromisoformat(pos['created_at'].replace('Z', '+00:00'))
-                        days_old = (datetime.now(timezone.utc) - created_at).days
+                        days_old = (datetime.now(created_at.tzinfo) - created_at).days
                         
                         if days_old <= 2:  # Только очень свежие данные (не старше 2 дней)
                             # Адаптируем поля позиции для совместимости с форматтером
@@ -242,16 +242,9 @@ class MultiChainReportGenerator:
                     positions_by_pool[pool_id] = []
                 positions_by_pool[pool_id].append(pos)
             
-            # Убираем дублирование пулов - берем только последние записи для каждого pool_id (и только свежие)
+            # Убираем дублирование пулов - берем только последние записи для каждого pool_id
             unique_pools = {}
             for pool in pools_result.data:
-                try:
-                    from datetime import datetime, timezone, timedelta
-                    created_at = datetime.fromisoformat(pool['created_at'].replace('Z', '+00:00'))
-                    if (datetime.now(timezone.utc) - created_at) > timedelta(days=2):
-                        continue  # пропускаем несвежие пулы
-                except Exception:
-                    pass  # в случае проблем с датой всё равно включим
                 pool_id = pool['pool_id']
                 if pool_id not in unique_pools:
                     unique_pools[pool_id] = pool
@@ -373,10 +366,11 @@ class MultiChainReportGenerator:
                     active_positions.append(pos)
             positions_result.data = active_positions
             
-            # Получаем данные пулов для контекста
+            # Получаем данные пулов для контекста (последние 7 дней)
+            week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
             pools_result = supabase_handler.client.table('lp_pool_snapshots').select('*').eq(
                 'network', 'ethereum'
-            ).gte('created_at', '2025-07-28').order('created_at', desc=True).execute()
+            ).gte('created_at', week_ago).order('created_at', desc=True).execute()
             
             # Адаптируем данные для совместимости с ReportFormatter
             ethereum_positions = positions_result.data if positions_result.data else []
@@ -477,10 +471,11 @@ class MultiChainReportGenerator:
                 if pos_mint not in unique_positions:
                     unique_positions[pos_mint] = pos
             
-            # Получаем данные пулов для контекста (Base, свежие ≤ 2 дней)
+            # Получаем данные пулов для контекста (Base, последние 7 дней)
+            week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
             pools_result = supabase_handler.client.table('lp_pool_snapshots').select('*').eq(
                 'network', 'base'
-            ).gte('created_at', '2025-07-28').order('created_at', desc=True).execute()
+            ).gte('created_at', week_ago).order('created_at', desc=True).execute()
 
             # Множество валидных Base-пулов по свежести (≤ 2 дней) и валидным адресам
             valid_base_pool_ids = set()
