@@ -448,7 +448,7 @@ class AlertingSystem:
             cutoff_date = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
             
             positions_result = supabase_handler.client.table('lp_position_snapshots').select(
-                'position_mint, pool_name, pool_id, network, position_value_usd, tick_lower, tick_upper, created_at, liquidity'
+                'position_mint, pool_name, pool_id, network, position_value_usd, tick_lower, tick_upper, tick_current, current_price, created_at, liquidity, in_range, fees_usd'
             ).gte('created_at', cutoff_date).order('created_at', desc=True).execute()
             
             if not positions_result.data:
@@ -551,7 +551,7 @@ class AlertingSystem:
                         'tick_lower': pos['tick_lower'],
                         'tick_upper': pos['tick_upper'],
                         'current_tick': current_tick,
-                        'fees_usd': 0  # Для совместимости с formatter
+                        'fees_usd': pos.get('fees_usd', 0) or 0  # Используем реальные fees из базы
                     }
                     all_positions.append(adapted_pos)
             
