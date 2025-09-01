@@ -33,13 +33,14 @@ TARGET_POOL_ID_2 = "4LuGwek6Jv4xpGvsQwZXonmLuRhrpHtmKVs95bN9EkTm"  # SOL/BIO
 TARGET_POOL_ID_3 = "DCNWwwSHSLYRR9WbBunkRaPEC73ba68yQNhytap3qRJZ"  # BIO/QBIO
 TARGET_POOL_ID_4 = "3K2NaZx1KAyJqsdUkUu9qgtk1qJEs6wbygjLxJvvXrLhq" # BIO/GROW
 TARGET_POOL_ID_5 = "CkDV9Eko3KijeRpadFyJTSi4fiBbCT9d3Vdp9JhsUioM" # SOL/SPINE
-TARGET_POOL_ID_6 = "2J6soXrYA2wgBNYfAk5cBddF2oGPTZtqwdFVctoA17SK" # BIO/SPINE
+TARGET_POOL_ID_6 = "5LZawn1Pqv8Jd96nq5GPVZAz9a7jZWFD66A5JvUodRNL" # BIO/SPINE (исправлено)
 TARGET_POOL_ID_7 = "HMWSMe7PVmwmiRccbTW14BkKj54x3XESgBgqAshTutaA" # BIO/RIF
 TARGET_POOL_ID_8 = "FErC1cX1tH2mGRpzfXpeAiNMe6Zu2zpQSeqteDAm9W49" # BIO/URO
 TARGET_POOL_ID_9 = "FgCQoL7tcC1nkNazV5onEgWbm9UJ9nbzqo9rZCYm6Yi4" # SOL/MYCO
 TARGET_POOL_ID_10 = "HhtxoFCY7uxQKBP1AHVXhCQ3jYtRWL3n1CwBKcfoun5Q" # BIO/MYCO
 TARGET_POOL_ID_11 = "H58TC6cVVnBQ3TL6Q7YrQ6bQnumYBfraybcsad54tBTh" # BIO/RAP
 TARGET_POOL_ID_12 = "CFFQHJQZd7SatSRLiGD1ehVaHsxpesNqyeSXBLyLh9cy" # BIO/OMIPAL
+TARGET_POOL_ID_13 = "AojR1PokyjRAQsVYgftnWn6T5cs9KPiZG7oEKFkhBrkS" # BIO/NEURON
 
 # Собираем их в список для итерации, отфильтровывая пустые или None значения
 PRIMARY_TARGET_POOL_IDS = [
@@ -55,7 +56,8 @@ PRIMARY_TARGET_POOL_IDS = [
         TARGET_POOL_ID_9,
         TARGET_POOL_ID_10,
         TARGET_POOL_ID_11,
-        TARGET_POOL_ID_12
+        TARGET_POOL_ID_12,
+        TARGET_POOL_ID_13
     ] if pid and pid.strip()
 ]
 
@@ -2641,12 +2643,12 @@ async def save_report_to_file(pools_data: List[Dict[str, Any]], token_prices: Di
             
             report_lines.append(f"  24h Volume: ${pool_volume_24h:,.2f}")
             
-            # Дневные объемы за 7 дней
+            # Дневные объемы за последние 3 дня (как просил пользователь)
             daily_volumes = pool.get('pool_7d_daily_volumes', [])
             if daily_volumes:
                 report_lines.append("")
-                report_lines.append("Daily volumes (7d):")
-                for dv in daily_volumes[-7:]:  # Последние 7 дней
+                report_lines.append("Daily volumes (3d):")
+                for dv in daily_volumes[-3:]:  # Только последние 3 дня  
                     volume = float(dv.get('daily_usd_volume', 0))
                     report_lines.append(f"  {dv.get('date', 'N/A')}: ${volume:,.2f}")
             

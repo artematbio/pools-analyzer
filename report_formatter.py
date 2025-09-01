@@ -250,11 +250,13 @@ class ReportFormatter:
             
             report.append(f"  24h Vol: ${pool['volume_24h']:,.2f}")
             
-            # Daily volumes (last 7 days) - сокращаем заголовок
-            if pool['daily_volumes']:
-                report.append("Daily volumes (7d):")
-                for dv in pool['daily_volumes'][-7:]:
-                    report.append(f"  {dv['date']}: ${dv['volume']:,.2f}")
+            # Daily volumes (last 3 days) - показываем только последние 3 дня как просил пользователь
+            daily_volumes = pool.get('daily_volumes', [])
+            if daily_volumes:
+                report.append("Daily volumes (3d):")
+                for dv in daily_volumes[-3:]:  # Только последние 3 дня
+                    volume = float(dv.get('volume', dv.get('daily_usd_volume', 0)))
+                    report.append(f"  {dv.get('date', 'N/A')}: ${volume:,.2f}")
             
             # Positions
             report.append("POSITIONS:")
@@ -897,6 +899,15 @@ Change: {change_sign}${change_amount:,.2f} ({change_percent:+.1f}%)
                 section.append(_format_tvl_with_change(pool_tvl, pool_address, "solana"))
                 section.append(f"  💰 Our positions: ${pool_value:,.2f} ({pool_count} pos)")
                 section.append(f"  🎁 Yield: ${pool_yield:,.2f}")
+                
+                # Добавляем daily volumes за последние 3 дня
+                daily_volumes = pool.get('pool_7d_daily_volumes', [])
+                if daily_volumes:
+                    section.append("  📊 Daily volume (3d):")
+                    for dv in daily_volumes[-3:]:  # Последние 3 дня
+                        volume = float(dv.get('daily_usd_volume', 0))
+                        date = dv.get('date', 'N/A')
+                        section.append(f"    {date}: ${volume:,.0f}")  # Без .2f для экономии места
                 
                 # Детали позиций
                 positions = pool.get('positions', [])
